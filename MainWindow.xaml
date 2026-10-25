@@ -1,0 +1,62 @@
+<Window x:Class="ClaudeLocalBridge.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:wv="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+ Title="Local Claude Bridge — web session" Width="1320" Height="900" MinWidth="1000" MinHeight="700"
+ Background="#F4F4F1" FontFamily="Segoe UI" WindowStartupLocation="CenterScreen">
+ <Grid Margin="20">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <DockPanel Margin="0,0,0,16">
+   <StackPanel DockPanel.Dock="Left"><TextBlock Text="Local Claude Bridge" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="Claude web session · experimental v0.1.0" Foreground="#666"/></StackPanel>
+   <TextBlock x:Name="EndpointText" Text="Endpoint stopped" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="15"/>
+  </DockPanel>
+  <Grid Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="375"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+    <StackPanel>
+     <Border Background="White" CornerRadius="10" Padding="16"><StackPanel>
+      <TextBlock Text="1  Claude web session" FontSize="18" FontWeight="SemiBold"/>
+      <TextBlock Text="Sign in on the Claude page to the right. Your session stays in this app’s browser profile." Margin="0,8,0,12"/>
+      <WrapPanel><Button Content="Open Claude" Click="Login_Click" ToolTip="Opens regular claude.ai. Recommended: email login if your identity provider blocks embedded browsers."/><Button x:Name="CheckButton" Content="Check session" Click="Check_Click"/></WrapPanel>
+      <TextBlock Text="Workspace  ⓘ" Margin="0,12,0,4" ToolTip="Claude organization for requests. Recommended: your personal workspace for a free account. Choose explicitly if you have several."/>
+      <ComboBox x:Name="OrgBox" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="Org_Changed" MinHeight="30"/>
+      <Button Content="Sign out / clear app session" Click="SignOut_Click" Margin="0,10,0,0" ToolTip="Stops the endpoint and clears only this app’s browser profile. Other browsers are not affected."/>
+     </StackPanel></Border>
+     <Border Background="White" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
+      <TextBlock Text="2  Endpoint settings" FontSize="18" FontWeight="SemiBold"/>
+      <TextBlock Text="Port  ⓘ" Margin="0,10,0,4" ToolTip="TCP port for http://127.0.0.1. Recommended: 8081. Range: 1024–65535. Connections are accepted from this PC only."/>
+      <TextBox x:Name="PortBox" Padding="7"/>
+      <CheckBox x:Name="OpenAiBox" Content="OpenAI-compatible endpoint  ⓘ" Margin="0,12,0,4" ToolTip="Adds /v1/chat/completions. Recommended: enabled for OpenAI SDK clients. Text only; SSE output is buffered until generation finishes."/>
+      <TextBlock Text="Claude web model  ⓘ" Margin="0,8,0,4" ToolTip="Model ID sent to Claude. Recommended: match a model available in your Claude account. Local clients use the alias claude-web."/>
+      <TextBox x:Name="ModelBox" Padding="7"/>
+      <TextBlock Text="Request timeout (seconds)  ⓘ" Margin="0,10,0,4" ToolTip="Maximum wait for generation. Recommended: 120 seconds. Range: 15–600. Timed-out requests are not retried automatically."/>
+      <TextBox x:Name="TimeoutBox" Padding="7"/>
+      <Button Content="Save settings" Click="Save_Click" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+      <WrapPanel Margin="0,12,0,0"><Button x:Name="StartButton" Content="Start endpoint" Click="Start_Click"/><Button Content="Stop" Click="Stop_Click"/></WrapPanel>
+     </StackPanel></Border>
+     <Border Background="White" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
+      <TextBlock Text="3  Local API keys  ⓘ" FontSize="18" FontWeight="SemiBold" ToolTip="Keys protect the local endpoint. They are not Anthropic keys. Recommended: a separate key per client. Only hashes are saved."/>
+      <TextBox x:Name="KeyNameBox" Text="My local client" Padding="7" Margin="0,10,0,8" ToolTip="A friendly label for this key. Recommended: the client application name."/>
+      <WrapPanel><Button Content="Create key" Click="CreateKey_Click"/><Button Content="Revoke selected" Click="RevokeKey_Click"/></WrapPanel>
+      <ListBox x:Name="KeysBox" DisplayMemberPath="Label" Height="75" Margin="0,10,0,8"/>
+      <TextBlock Text="New key (shown once)"/>
+      <TextBox x:Name="NewKeyBox" IsReadOnly="True" Padding="7" Margin="0,4,0,8"/>
+      <Button Content="Copy new key" Click="CopyKey_Click" HorizontalAlignment="Left"/>
+     </StackPanel></Border>
+     <Border Background="White" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
+      <TextBlock Text="4  Quick test" FontSize="18" FontWeight="SemiBold"/>
+      <TextBlock Text="Sends “Reply with exactly OK.” through the local endpoint. Each API request creates a new chat visible in Claude." Margin="0,8,0,10"/>
+      <Button x:Name="TestButton" Content="Test local endpoint → Claude" Click="Test_Click"/>
+      <TextBox x:Name="LogBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="130" Margin="0,12,0,0" Background="#20252B" Foreground="#EEE" Padding="8" FontFamily="Consolas"/>
+     </StackPanel></Border>
+    </StackPanel>
+   </ScrollViewer>
+   <Grid Grid.Column="2">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <TextBlock x:Name="BrowserLocationText" Text="Loading claude.ai…" Padding="10" Background="#E7E7E2" TextTrimming="CharacterEllipsis"/>
+    <wv:WebView2 x:Name="Browser" Grid.Row="1"/>
+   </Grid>
+  </Grid>
+  <TextBlock x:Name="StatusText" Grid.Row="2" Text="Starting browser…" Margin="0,14,0,0" FontWeight="SemiBold"/>
+ </Grid>
+</Window>

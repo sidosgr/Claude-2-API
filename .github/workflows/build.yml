@@ -1,0 +1,34 @@
+name: Windows build and tests
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: dotnet build ClaudeLocalBridge.csproj -c Release
+      - run: dotnet run --project tests/Bridge.Tests.csproj -c Release
+      - run: node tests/stream.test.cjs
+      - run: node tests/web-transport.test.cjs
+      - run: dotnet publish ClaudeLocalBridge.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish/win-x64
+      - shell: pwsh
+        run: |
+          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/LocalClaudeBridge-Windows-x64.zip
+          (Get-FileHash artifacts/LocalClaudeBridge-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() + '  LocalClaudeBridge-Windows-x64.zip' | Set-Content artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalClaudeBridge-Windows-x64
+          path: |
+            artifacts/LocalClaudeBridge-Windows-x64.zip
+            artifacts/SHA256SUMS.txt
