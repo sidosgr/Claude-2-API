@@ -2,7 +2,7 @@
 
 An experimental, open-source Windows app that connects a **regular Claude web session** to a local text-generation endpoint. Sign in directly on `https://claude.ai` inside the app; no Claude Code login or Anthropic API key is used.
 
-**Status:** native desktop app and local API implemented. The first live test authenticated successfully, but generation was rejected by Claude. Free-account generation is not working in the verified test. This experiment uses undocumented Claude website interfaces. It is not an official Anthropic integration, and website changes or account restrictions can prevent it from working. A working session does not independently prove your plan type or how usage is accounted for.
+**Status:** a live Windows test successfully returned `OK` through the local endpoint using a signed-in Claude web session and `claude-sonnet-5-5`. The account was supplied for a free-account test; plan identity and allowance accounting were not independently verified. See [TESTING.md](TESTING.md). This experiment uses undocumented Claude website interfaces. It is not an official Anthropic integration, and website changes or account restrictions can prevent it from working.
 
 ## Run on Windows
 
@@ -17,7 +17,7 @@ dotnet build .\ClaudeLocalBridge.csproj -c Release
 
 1. Sign in on the Claude page inside the app. Email login may work when an identity provider blocks embedded browsers. Complete any browser verification yourself.
 2. Click **Check session**. Select a workspace if you have several.
-3. Match the **Claude web model** setting to a model available to your account. The initial model ID is an editable candidate, not a verified entitlement.
+3. Match the **Claude web model** setting to a model available to your account. Default: `claude-sonnet-5-5` (Sonnet 5.5). Machine IDs use hyphens, not decimal dots; the earlier `claude-sonnet-5.5` input is migrated automatically.
 4. Click **Test local endpoint → Claude** at the bottom of the left panel. It sends “Reply with exactly OK.” through the local API and creates a chat in Claude.
 5. Create a local API key for your client and copy the displayed key. Only its hash is saved.
 

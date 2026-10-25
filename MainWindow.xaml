@@ -7,7 +7,7 @@
  <Grid Margin="20">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <DockPanel Margin="0,0,0,16">
-   <StackPanel DockPanel.Dock="Left"><TextBlock Text="Local Claude Bridge" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="Claude web session · experimental v0.1.0" Foreground="#666"/></StackPanel>
+   <StackPanel DockPanel.Dock="Left"><TextBlock Text="Local Claude Bridge" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="Claude web session · experimental v0.1.1" Foreground="#666"/></StackPanel>
    <TextBlock x:Name="EndpointText" Text="Endpoint stopped" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="15"/>
   </DockPanel>
   <Grid Grid.Row="1">
@@ -27,7 +27,7 @@
       <TextBlock Text="Port  ⓘ" Margin="0,10,0,4" ToolTip="TCP port for http://127.0.0.1. Recommended: 8081. Range: 1024–65535. Connections are accepted from this PC only."/>
       <TextBox x:Name="PortBox" Padding="7"/>
       <CheckBox x:Name="OpenAiBox" Content="OpenAI-compatible endpoint  ⓘ" Margin="0,12,0,4" ToolTip="Adds /v1/chat/completions. Recommended: enabled for OpenAI SDK clients. Text only; SSE output is buffered until generation finishes."/>
-      <TextBlock Text="Claude web model  ⓘ" Margin="0,8,0,4" ToolTip="Model ID sent to Claude. Recommended: match a model available in your Claude account. Local clients use the alias claude-web."/>
+      <TextBlock Text="Claude web model  ⓘ" Margin="0,8,0,4" ToolTip="Machine model ID sent to Claude, using hyphens. Recommended for Sonnet 5.5: claude-sonnet-5-5. Match a model available in your account. Local clients use the alias claude-web."/>
       <TextBox x:Name="ModelBox" Padding="7"/>
       <TextBlock Text="Request timeout (seconds)  ⓘ" Margin="0,10,0,4" ToolTip="Maximum wait for generation. Recommended: 120 seconds. Range: 15–600. Timed-out requests are not retried automatically."/>
       <TextBox x:Name="TimeoutBox" Padding="7"/>

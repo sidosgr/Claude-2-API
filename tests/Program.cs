@@ -10,6 +10,7 @@ void Check(bool value, string message) { if (!value) throw new Exception(message
 var folder = Path.Combine(Path.GetTempPath(), "LocalClaudeBridge-Tests-" + Guid.NewGuid().ToString("N"));
 var path = Path.Combine(folder, "settings.json");
 var state = new BridgeState(path);
+Check(BridgeState.NormalizeModel("claude-sonnet-5.5") == "claude-sonnet-5-5", "Sonnet display version must use the documented model ID");
 var key = state.CreateKey("Test client");
 Check(state.Authenticate(key.Secret), "Created key must authenticate");
 Check(!state.Authenticate(key.Secret + "wrong"), "Wrong key must fail");

@@ -14,11 +14,23 @@ public partial class MainWindow : Window
     private WebSession session = null!;
     private LocalServer server = null!;
     private bool initialized, busy, closing;
+    private bool startupTestPending = Environment.GetCommandLineArgs().Contains("--quick-test");
     private readonly List<object> report = [];
 
     public MainWindow()
     {
         InitializeComponent();
+        try
+        {
+            var historyPath = Path.Combine(BridgeState.DataFolder, "web-session-test.json");
+            if (File.Exists(historyPath))
+            {
+                using var history = JsonDocument.Parse(File.ReadAllText(historyPath));
+                if (history.RootElement.TryGetProperty("events", out var previous) && previous.ValueKind == JsonValueKind.Array)
+                    report.AddRange(previous.EnumerateArray().TakeLast(100).Select(item => (object)item.Clone()));
+            }
+        }
+        catch (Exception) { /* Diagnostic history must not prevent startup. */ }
         Loaded += Initialize;
         Closing += async (_, e) =>
         {
@@ -41,6 +53,12 @@ public partial class MainWindow : Window
             session = new WebSession(Browser);
             server = new LocalServer(state, session.CompleteAsync);
             await session.InitializeAsync();
+            Browser.NavigationCompleted += async (_, args) =>
+            {
+                if (!startupTestPending || !args.IsSuccess || !initialized || Browser.Source?.Host != "claude.ai" || !Browser.Source.AbsolutePath.StartsWith("/new")) return;
+                startupTestPending = false;
+                await Guard(RunQuickTest);
+            };
             Browser.CoreWebView2.SourceChanged += (_, _) => BrowserLocationText.Text = Browser.Source?.GetLeftPart(UriPartial.Path) ?? "Claude browser";
             initialized = true;
             Log("browser", "Regular Claude web session is ready for you to sign in.");
@@ -54,10 +72,11 @@ public partial class MainWindow : Window
         StatusText.Text = message;
         LogBox.AppendText($"{DateTime.Now:HH:mm:ss} [{stage}] {message}\n"); LogBox.ScrollToEnd();
         report.Add(new { utc = DateTimeOffset.UtcNow, stage, message });
+        if (report.Count > 200) report.RemoveRange(0, report.Count - 200);
         try
         {
             Directory.CreateDirectory(BridgeState.DataFolder);
-            File.WriteAllText(Path.Combine(BridgeState.DataFolder, "web-session-test.json"), JsonSerializer.Serialize(new { version = "0.1.0", events = report }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(Path.Combine(BridgeState.DataFolder, "web-session-test.json"), JsonSerializer.Serialize(new { version = "0.1.1", events = report }, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -88,7 +107,7 @@ public partial class MainWindow : Window
         var remembered = organizations.FirstOrDefault(o => o.Id == state.Settings.OrganizationId);
         if (remembered is not null) OrgBox.SelectedItem = remembered;
         else if (organizations.Count == 1) OrgBox.SelectedIndex = 0;
-        Log("session", organizations.Count switch { 0 => "No Claude workspace found. Complete the login in the browser.", 1 => "Claude web session verified. Personal/account plan type remains unverified.", _ => "Claude web session verified. Choose the workspace to use." });
+        Log("session", session.Ready ? "Claude web session verified. Selected workspace is ready; account plan type remains unverified." : organizations.Count == 0 ? "No Claude workspace found. Complete the login in the browser." : "Claude web session verified. Choose the workspace to use.");
     }
     private void Org_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -112,7 +131,7 @@ public partial class MainWindow : Window
     private BridgeSettings ReadSettings()
     {
         if (!int.TryParse(PortBox.Text, out var port) || !int.TryParse(TimeoutBox.Text, out var timeout)) throw new ArgumentException("Port and timeout must be whole numbers.");
-        var settings = new BridgeSettings(port, OpenAiBox.IsChecked == true, ModelBox.Text.Trim(), timeout, state.Settings.OrganizationId);
+        var settings = new BridgeSettings(port, OpenAiBox.IsChecked == true, BridgeState.NormalizeModel(ModelBox.Text), timeout, state.Settings.OrganizationId);
         BridgeState.Validate(settings); return settings;
     }
     private async void Save_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -120,6 +139,7 @@ public partial class MainWindow : Window
         var settings = ReadSettings();
         await server.DisposeAsync(); EndpointText.Text = "Endpoint stopped";
         state.Update(settings);
+        ModelBox.Text = settings.Model;
         Log("settings", "Settings saved. Click Start endpoint to apply them.");
     });
     private async Task StartEndpoint()
@@ -153,7 +173,8 @@ public partial class MainWindow : Window
         try { Clipboard.SetText(NewKeyBox.Text); Log("keys", "New local key copied to the clipboard."); }
         catch (Exception) { Log("keys", "Clipboard is unavailable. Select and copy the displayed key manually."); }
     }
-    private async void Test_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
+    private async void Test_Click(object sender, RoutedEventArgs e) => await Guard(RunQuickTest);
+    private async Task RunQuickTest()
     {
         if (!session.Ready) await CheckSession();
         if (!session.Ready) throw new BridgeException(503, "session_not_ready", "Finish signing in and select your workspace before running the test.");
@@ -175,5 +196,5 @@ public partial class MainWindow : Window
             Log("test_passed", text.Trim() == "OK" ? "PASS: local endpoint returned OK from the Claude web session. Free-plan identity and allowance attribution are not independently verified." : "PASS: Claude web session returned a text response through the local endpoint. Reply differed from OK; free allowance remains unverified.");
         }
         finally { state.Revoke(temporary.Id); RefreshKeys(); }
-    });
+    }
 }
