@@ -1,5 +1,23 @@
 # Verification record
 
+## In-app updater — 0.3.0
+
+- 28 updater assertions cover stable-version selection, draft/preview exclusion, digest and size requirements, URL/redirect restrictions, cache reuse/replacement, truncated/corrupt downloads, cancellation, staging, settings preservation, ZIP traversal rejection, and rollback after failed startup confirmation.
+- A separate self-contained Windows helper runs outside the replaceable application folder. Application files use an owned per-user directory; browser data and settings remain in the parent data folder.
+- The 39 API integration assertions and JavaScript suites remain in the Windows build workflow. Release packaging includes the helper and a SHA-256 checksum file.
+- Live download/installation results against the published release are recorded in its release notes after publication; offline assertions alone do not establish a real upgrade.
+
+## Local 0.2.0 update — 26 October 2026
+
+- Dark appearance is enabled by default and applied to both the WPF interface and WebView2's preferred color scheme. An optional light theme is available.
+- The embedded Claude page itself displayed `Free plan`. The website picker exposed actual `data-model-id` values for Sonnet 5.5 and Haiku 5.5. Disabled/upgrade entries were excluded, including an Opus label whose DOM text joined `5.5Pro...Upgrade` without spaces. The live local `/v1/models` response returned exactly `claude-sonnet-5-5` and `claude-haiku-5-5`.
+- The user's installed Pi transport was loaded from an isolated copy of its installed application code. Against the real local endpoint and signed-in Claude web session, it streamed an `echo` function call, supplied a synthetic string result, and received final text exactly `OK`. The test tool performed no filesystem or shell operations.
+- The actual Pi request included `stream_options`, `store`, `max_completion_tokens`, `tools`, and `tool_choice`. The bridge accepted and translated it successfully.
+- A direct live request to `claude-haiku-5-5` returned HTTP 200 and exactly `OK`, verifying explicit model routing.
+- Local integration tests cover authenticated and no-key modes, preservation of Host/Origin restrictions without keys, actual model routing, compatibility-warning headers, buffered tool-call SSE, a follow-up tool-result turn, rejection of invented tools, native `x-api-key`, and native buffered SSE. JavaScript tests cover picker extraction, disabled/upgrade rows, explicit model IDs, framing, transport errors, and repeated injection.
+
+The user approved publishing these changes together with the updater. Full coding workloads, every Pi/OpenCode tool schema, strict schema enforcement, real-time token streaming, and remaining-quota accounting remain unverified.
+
 ## Live Windows test — 26 October 2026
 
 - The user signed in directly to claude.ai in the app-owned WebView2 profile.

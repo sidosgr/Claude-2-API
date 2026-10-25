@@ -5,10 +5,26 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 namespace ClaudeLocalBridge;
 
-public sealed record BridgeSettings(int Port = 8081, bool OpenAi = true, string Model = "claude-sonnet-5-5", int TimeoutSeconds = 120, string? OrganizationId = null);
+public sealed record BridgeSettings(int Port = 8081, bool OpenAi = true, string Model = "claude-sonnet-5-5", int TimeoutSeconds = 120, string? OrganizationId = null, bool RequireApiKey = true, bool DarkMode = true, bool ToolCalling = true, bool CheckUpdatesOnStartup = true);
 public sealed record LocalKey(string Id, string Name, string Prefix, string Hash) { public string Label => $"{Name} · {Prefix}…"; }
 public sealed record Organization(string Id, string Name);
-public sealed record Completion(string Text, string Model);
+public sealed record FunctionCall(string Id, string Name, string Arguments);
+public sealed record Completion(string Text, string Model, IReadOnlyList<FunctionCall>? ToolCalls = null, string FinishReason = "stop");
+public sealed record WebModel(string Id, string Name);
+public sealed class ModelCatalog
+{
+    private readonly object gate = new();
+    private WebModel[] models = [];
+    public IReadOnlyList<WebModel> Snapshot { get { lock (gate) return models.ToArray(); } }
+    public void Replace(IEnumerable<WebModel> available) { lock (gate) models = available.Where(m => System.Text.RegularExpressions.Regex.IsMatch(m.Id, @"^claude-[a-z0-9-]+$")).DistinctBy(m => m.Id).Take(30).ToArray(); }
+    public void Clear() { lock (gate) models = []; }
+    public string Resolve(string requested, string fallback)
+    {
+        if (requested == "claude-web") return fallback;
+        if (requested == fallback || Snapshot.Any(m => m.Id == requested)) return requested;
+        throw new BridgeException(404, "model_not_found", "This model has not been discovered in the Claude picker. Refresh models in the app or use claude-web for the configured default.");
+    }
+}
 public sealed class BridgeException(int status, string code, string message) : Exception(message)
 {
     public int Status { get; } = status;

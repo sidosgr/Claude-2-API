@@ -2,7 +2,7 @@
 
 An experimental, open-source Windows app that connects a **regular Claude web session** to a local text-generation endpoint. Sign in directly on `https://claude.ai` inside the app; no Claude Code login or Anthropic API key is used.
 
-**Status:** a live Windows test successfully returned `OK` through the local endpoint using a signed-in Claude web session and `claude-sonnet-5-5`. The account was supplied for a free-account test; plan identity and allowance accounting were not independently verified. See [TESTING.md](TESTING.md). This experiment uses undocumented Claude website interfaces. It is not an official Anthropic integration, and website changes or account restrictions can prevent it from working.
+**Version 0.3.0:** in-app update checks, verified downloads, and installation/restart are included alongside dark mode, optional local API keys, model discovery, and harness tool-call translation. Live Sonnet and Haiku requests returned `OK`; the installed Pi transport completed a tool-call/result/final-answer round trip. The embedded Claude page displayed `Free plan`. Remaining quota and allowance accounting are not exposed. See [TESTING.md](TESTING.md). This experiment uses undocumented Claude website interfaces and can be affected by website changes or account restrictions.
 
 ## Run on Windows
 
@@ -11,27 +11,41 @@ Requirements: Windows 10/11, .NET 8 Desktop Runtime for a framework-dependent bu
 From source, install the .NET 8 SDK, then run:
 
 ```powershell
-dotnet build .\ClaudeLocalBridge.csproj -c Release
-.\bin\Release\net8.0-windows\ClaudeLocalBridge.exe
+.\scripts\Build-Release.ps1
+.\artifacts\release\0.3.0\win-x64\ClaudeLocalBridge.exe
 ```
 
 1. Sign in on the Claude page inside the app. Email login may work when an identity provider blocks embedded browsers. Complete any browser verification yourself.
-2. Click **Check session**. Select a workspace if you have several.
+2. Click **Check session**. Select a workspace if you have several. The app refreshes models from the visible Claude picker after verifying the saved workspace; you can also click **Refresh models from Claude**.
 3. Match the **Claude web model** setting to a model available to your account. Default: `claude-sonnet-5-5` (Sonnet 5.5). Machine IDs use hyphens, not decimal dots; the earlier `claude-sonnet-5.5` input is migrated automatically.
 4. Click **Test local endpoint → Claude** at the bottom of the left panel. It sends “Reply with exactly OK.” through the local API and creates a chat in Claude.
-5. Create a local API key for your client and copy the displayed key. Only its hash is saved.
+5. Create a local API key for your client and copy the displayed key. Only its hash is saved. To run without a key, uncheck **Require a local API key**, save settings, and restart the endpoint. Local SDKs that insist on a key can use a dummy value in this mode.
 
-The endpoint starts on demand and binds only to `127.0.0.1`. Default base URL: `http://127.0.0.1:8081/v1`. Settings provide port selection, OpenAI compatibility, upstream web model, and request timeout. Hover the info labels for explanations and suggested values.
+The endpoint starts on demand and binds only to `127.0.0.1`. Default base URL: `http://127.0.0.1:8081/v1`. Settings provide port selection, OpenAI compatibility, model discovery and selection, request timeout, local authentication, tool-call translation, and appearance. **Dark mode is the default**, with an optional light theme. Hover the info labels for explanations and suggested values.
+
+## Update inside the app
+
+Update status appears beside the app version. **Check for updates** reads this repository's latest public stable GitHub release. Automatic checks are enabled by default and can be disabled in settings; the app does not automatically download or install updates.
+
+1. Click **Download update** when a newer version is available. Progress and cancellation stay in the app. Exact size and SHA-256 must match the GitHub release metadata. Valid cached packages are reused.
+2. Click **Install and restart**. The app rechecks the package, saves settings, stops the endpoint, and starts its bundled standalone updater.
+3. The updater waits for the app to exit, stages new files, keeps a rollback copy, and launches the new version. Startup must be acknowledged or the previous install is restored. A running endpoint is restarted with its saved configuration.
+
+Updated files live in `%LOCALAPPDATA%\LocalClaudeBridge\App`, with a **Local Claude Bridge** Start-menu shortcut. Settings, key hashes, and browser login remain in the parent data folder. Downloads, helpers, and rollback copies live under `Updates\`. Administrator access and browser download handoffs are unnecessary.
+
+The updater accepts the expected Windows x64 asset from this repository over approved GitHub HTTPS hosts, requires a digest, caps downloads at 512 MiB, and rejects unsafe archive paths. Extract the whole package: it includes the helper needed for installation.
+
+For an explicitly requested scripted update, `--install-update` runs the same verified check/download/install flow. Add `--start-endpoint` to restart the endpoint afterward. Ordinary launches use the interactive controls.
 
 ## Local API
 
-All `/v1` routes require `Authorization: Bearer <local-key>`. Keys are generated by this app and are not Anthropic credentials. `GET /health` returns a minimal process health response without authentication; it does not assert that Claude is signed in.
+By default, `/v1` routes require `Authorization: Bearer <local-key>` or `x-api-key: <local-key>`. Keys are generated by this app and are not Anthropic credentials. The optional no-key mode accepts requests without credentials while preserving loopback binding and browser-origin restrictions. `GET /health` returns process health and authentication-mode status; it does not assert that Claude is signed in.
 
 | Route | Behavior |
 | --- | --- |
-| `GET /v1/models` | Returns the local alias `claude-web`; does not claim upstream model discovery. |
-| `POST /v1/chat/completions` | OpenAI-compatible text messages; optional buffered SSE with `stream: true`. Can be disabled in settings. |
-| `POST /v1/messages` | Experimental text-only Messages-shaped endpoint. Not full Anthropic SDK compatibility. |
+| `GET /v1/models` | Returns selectable model IDs read from the current Claude picker, excluding disabled and upgrade-only entries. Until discovery, returns `claude-web`. |
+| `POST /v1/chat/completions` | OpenAI-compatible text and translated function-tool requests; optional buffered SSE. Can be disabled in settings. |
+| `POST /v1/messages` | Experimental Messages-shaped text/tool endpoint with buffered SSE. Not full Anthropic SDK compatibility. |
 
 Python OpenAI client example:
 
@@ -50,14 +64,20 @@ answer = client.chat.completions.create(
 print(answer.choices[0].message.content)
 ```
 
-Compatibility limits:
+Model selection: `claude-web` remains a backward-compatible alias for the configured default. After discovery, clients can explicitly request `claude-sonnet-5-5` or `claude-haiku-5-5` when those IDs appear in the picker. The catalog is scoped to the signed-in browser session and refreshed after workspace verification. A selectable model is not a claim about remaining quota.
 
-- Text only. Tools, images, files, sampling controls, output-token budgets, Responses API, and native Messages streaming are not implemented. Unsupported top-level fields return HTTP 400 rather than being silently ignored.
+Pi custom providers need `"authHeader": true` alongside `"api": "openai-completions"`, the local base URL, and their local API key. Reopen `/model` to reload `models.json`. Do not put a real local key into a public configuration example.
+
+Harness compatibility and limits:
+
+- Text and function tools are supported. Tool definitions/history are translated through structured prompts; the reply is checked for the expected protocol ID, declared tool names, object arguments, required properties, and call-count constraints. The harness executes returned calls. This is prompt-based translation, not native website tool execution or complete JSON Schema validation. Malformed tool replies return 502 without retrying or forwarding a tool call.
+- Common Pi/OpenAI fields such as `max_tokens`, `max_completion_tokens`, `stream_options`, `store`, `metadata`, `temperature`, and tool selection are accepted. Token budgets become approximate prompt guidance; sampling, seed, and thinking controls cannot be enforced. The `X-Local-Claude-Compatibility` response header lists these caveats. `stop` strings are applied to the final text. `json_object` output is syntax-checked; strict JSON Schema output is unsupported.
+- Images, audio, files, legacy function APIs, and the Responses API are unsupported. Unknown fields and invalid values return explicit errors.
 - OpenAI SSE is buffered: generation finishes before output is emitted. It is not token-by-token delivery.
 - Every request creates a new Claude chat. Full caller history is serialized into prompt context, including system/developer instructions; this does not provide native system-message priority. No existing chats are read or deleted.
-- Token counts are unavailable and are omitted. The Messages-shaped response lacks official usage metadata.
+- Token counts are unavailable: `usage` is null rather than fabricated. The Messages-shaped endpoint is not a complete official SDK implementation.
 - One generation at a time. Limits return 429; there is no account rotation, automatic retry, paid API fallback, or quota bypass.
-- The maximum request body is 256 KiB; the maximum assembled prompt is 100,000 characters. Browser-origin requests are rejected; this is intended for local SDKs and desktop tools.
+- The maximum request body is 1 MiB; the maximum assembled prompt is 400,000 characters. Browser-origin requests are rejected; this is intended for local SDKs and desktop tools.
 
 ## Local data
 
@@ -75,7 +95,9 @@ Session cookies are never extracted, copied from another browser, exported, or c
 dotnet run --project .\tests\Bridge.Tests.csproj -c Release
 node .\tests\stream.test.cjs
 node .\tests\web-transport.test.cjs
-dotnet publish .\ClaudeLocalBridge.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\publish\win-x64
+node .\tests\models.test.cjs
+dotnet run --project .\tests\Updates\Updates.Tests.csproj -c Release
+.\scripts\Build-Release.ps1
 ```
 
 The integration suite uses a synthetic backend. It checks local authentication and revocation, origin/Host restrictions, validation, size limits, concurrency, endpoint toggling, and response formatting. The JavaScript tests cover stream framing, Unicode, truncated/error responses, and repeated injection. They do not replace a real signed-in account test.

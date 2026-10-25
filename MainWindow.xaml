@@ -3,38 +3,56 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:wv="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
  Title="Local Claude Bridge — web session" Width="1320" Height="900" MinWidth="1000" MinHeight="700"
- Background="#F4F4F1" FontFamily="Segoe UI" WindowStartupLocation="CenterScreen">
+ Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" FontFamily="Segoe UI" WindowStartupLocation="CenterScreen">
  <Grid Margin="20">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <DockPanel Margin="0,0,0,16">
-   <StackPanel DockPanel.Dock="Left"><TextBlock Text="Local Claude Bridge" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="Claude web session · experimental v0.1.1" Foreground="#666"/></StackPanel>
+   <StackPanel DockPanel.Dock="Left" MaxWidth="790">
+    <TextBlock Text="Local Claude Bridge" FontSize="26" FontWeight="SemiBold"/>
+    <TextBlock x:Name="VersionText" Foreground="{DynamicResource MutedBrush}"/>
+    <WrapPanel Margin="0,8,0,0">
+     <Button x:Name="UpdateCheckButton" Content="Check for updates" Click="UpdateCheck_Click" ToolTip="Checks the latest public stable release on GitHub. Recommended: keep automatic checks enabled. Downloads and installation require your clicks."/>
+     <Button x:Name="UpdateDownloadButton" Content="Download update" Click="UpdateDownload_Click" Visibility="Collapsed"/>
+     <Button x:Name="UpdateInstallButton" Content="Install and restart" Click="UpdateInstall_Click" Visibility="Collapsed" ToolTip="Verifies the package again, saves settings, and installs a per-user copy. Your Claude login, API keys, settings, and endpoint mode are retained."/>
+     <Button x:Name="UpdateCancelButton" Content="Cancel" Click="UpdateCancel_Click" Visibility="Collapsed"/>
+    </WrapPanel>
+    <TextBlock x:Name="UpdateStatusText" Text="Update checks are ready." Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0" MaxWidth="760"/>
+    <ProgressBar x:Name="UpdateProgressBar" Height="5" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,5,12,0"/>
+   </StackPanel>
    <TextBlock x:Name="EndpointText" Text="Endpoint stopped" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="15"/>
   </DockPanel>
   <Grid Grid.Row="1">
    <Grid.ColumnDefinitions><ColumnDefinition Width="375"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
     <StackPanel>
-     <Border Background="White" CornerRadius="10" Padding="16"><StackPanel>
+     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16"><StackPanel>
       <TextBlock Text="1  Claude web session" FontSize="18" FontWeight="SemiBold"/>
       <TextBlock Text="Sign in on the Claude page to the right. Your session stays in this app’s browser profile." Margin="0,8,0,12"/>
       <WrapPanel><Button Content="Open Claude" Click="Login_Click" ToolTip="Opens regular claude.ai. Recommended: email login if your identity provider blocks embedded browsers."/><Button x:Name="CheckButton" Content="Check session" Click="Check_Click"/></WrapPanel>
       <TextBlock Text="Workspace  ⓘ" Margin="0,12,0,4" ToolTip="Claude organization for requests. Recommended: your personal workspace for a free account. Choose explicitly if you have several."/>
-      <ComboBox x:Name="OrgBox" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="Org_Changed" MinHeight="30"/>
+      <ComboBox x:Name="OrgBox" SelectedValuePath="Id" SelectionChanged="Org_Changed" MinHeight="30"/>
       <Button Content="Sign out / clear app session" Click="SignOut_Click" Margin="0,10,0,0" ToolTip="Stops the endpoint and clears only this app’s browser profile. Other browsers are not affected."/>
      </StackPanel></Border>
-     <Border Background="White" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
+     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
       <TextBlock Text="2  Endpoint settings" FontSize="18" FontWeight="SemiBold"/>
+      <CheckBox x:Name="DarkModeBox" Content="Dark mode  ⓘ" Margin="0,12,0,0" Click="Theme_Click" ToolTip="Changes this app's colors and the embedded browser's preferred color scheme. Recommended: enabled; dark mode is the default."/>
+      <CheckBox x:Name="AutoUpdateBox" Content="Check for updates on startup  ⓘ" Margin="0,10,0,0" Click="AutoUpdate_Click" ToolTip="Recommended: enabled. Checks GitHub for a newer stable Windows release and shows the result beside the app version. Downloads and installs happen only when you choose them."/>
       <TextBlock Text="Port  ⓘ" Margin="0,10,0,4" ToolTip="TCP port for http://127.0.0.1. Recommended: 8081. Range: 1024–65535. Connections are accepted from this PC only."/>
       <TextBox x:Name="PortBox" Padding="7"/>
       <CheckBox x:Name="OpenAiBox" Content="OpenAI-compatible endpoint  ⓘ" Margin="0,12,0,4" ToolTip="Adds /v1/chat/completions. Recommended: enabled for OpenAI SDK clients. Text only; SSE output is buffered until generation finishes."/>
+      <CheckBox x:Name="RequireKeyBox" Content="Require a local API key  ⓘ" Margin="0,10,0,4" ToolTip="Recommended: enabled. Turn off to use the endpoint without a key. While disabled, apps on this PC can use the endpoint. It remains bound to 127.0.0.1 and browser-origin requests stay blocked. Save settings and restart the endpoint to apply."/>
+      <CheckBox x:Name="ToolCallingBox" Content="Translate harness tool calls  ⓘ" Margin="0,8,0,4" ToolTip="Recommended: enabled for Pi and OpenCode. Tool definitions and results are sent as structured prompt context. Valid tool calls are returned to the harness for execution. This is prompt-based translation, not native website tool execution."/>
       <TextBlock Text="Claude web model  ⓘ" Margin="0,8,0,4" ToolTip="Machine model ID sent to Claude, using hyphens. Recommended for Sonnet 5.5: claude-sonnet-5-5. Match a model available in your account. Local clients use the alias claude-web."/>
       <TextBox x:Name="ModelBox" Padding="7"/>
+      <ComboBox x:Name="ModelPicker" SelectedValuePath="Id" SelectionChanged="Model_Changed" MinHeight="32" Margin="0,8,0,8" ToolTip="Models discovered from the currently visible Claude model picker. Upgrade-only or disabled entries are excluded. Choose a model, then Save settings to change the default."/>
+      <Button x:Name="ModelsButton" Content="Refresh models from Claude" Click="Models_Click" HorizontalAlignment="Left" ToolTip="Opens and reads the Claude model picker without choosing a model. Recommended: refresh after login or switching your account. The list reflects website availability, not remaining quota."/>
+      <TextBlock Text="Sampling controls are accepted for harness compatibility but cannot be enforced by the website. Token budgets become prompt guidance; streaming is buffered." Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" FontSize="12"/>
       <TextBlock Text="Request timeout (seconds)  ⓘ" Margin="0,10,0,4" ToolTip="Maximum wait for generation. Recommended: 120 seconds. Range: 15–600. Timed-out requests are not retried automatically."/>
       <TextBox x:Name="TimeoutBox" Padding="7"/>
       <Button Content="Save settings" Click="Save_Click" HorizontalAlignment="Left" Margin="0,12,0,0"/>
       <WrapPanel Margin="0,12,0,0"><Button x:Name="StartButton" Content="Start endpoint" Click="Start_Click"/><Button Content="Stop" Click="Stop_Click"/></WrapPanel>
      </StackPanel></Border>
-     <Border Background="White" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
+     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
       <TextBlock Text="3  Local API keys  ⓘ" FontSize="18" FontWeight="SemiBold" ToolTip="Keys protect the local endpoint. They are not Anthropic keys. Recommended: a separate key per client. Only hashes are saved."/>
       <TextBox x:Name="KeyNameBox" Text="My local client" Padding="7" Margin="0,10,0,8" ToolTip="A friendly label for this key. Recommended: the client application name."/>
       <WrapPanel><Button Content="Create key" Click="CreateKey_Click"/><Button Content="Revoke selected" Click="RevokeKey_Click"/></WrapPanel>
@@ -43,7 +61,7 @@
       <TextBox x:Name="NewKeyBox" IsReadOnly="True" Padding="7" Margin="0,4,0,8"/>
       <Button Content="Copy new key" Click="CopyKey_Click" HorizontalAlignment="Left"/>
      </StackPanel></Border>
-     <Border Background="White" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
+     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
       <TextBlock Text="4  Quick test" FontSize="18" FontWeight="SemiBold"/>
       <TextBlock Text="Sends “Reply with exactly OK.” through the local endpoint. Each API request creates a new chat visible in Claude." Margin="0,8,0,10"/>
       <Button x:Name="TestButton" Content="Test local endpoint → Claude" Click="Test_Click"/>
@@ -53,7 +71,7 @@
    </ScrollViewer>
    <Grid Grid.Column="2">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <TextBlock x:Name="BrowserLocationText" Text="Loading claude.ai…" Padding="10" Background="#E7E7E2" TextTrimming="CharacterEllipsis"/>
+    <TextBlock x:Name="BrowserLocationText" Text="Loading claude.ai…" Padding="10" Background="{DynamicResource PanelBrush}" TextTrimming="CharacterEllipsis"/>
     <wv:WebView2 x:Name="Browser" Grid.Row="1"/>
    </Grid>
   </Grid>

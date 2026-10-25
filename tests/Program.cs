@@ -11,6 +11,7 @@ var folder = Path.Combine(Path.GetTempPath(), "LocalClaudeBridge-Tests-" + Guid.
 var path = Path.Combine(folder, "settings.json");
 var state = new BridgeState(path);
 Check(BridgeState.NormalizeModel("claude-sonnet-5.5") == "claude-sonnet-5-5", "Sonnet display version must use the documented model ID");
+Check(state.Settings.DarkMode && state.Settings.RequireApiKey && state.Settings.ToolCalling,"New settings must default to dark mode, authenticated local access and tool translation");
 var key = state.CreateKey("Test client");
 Check(state.Authenticate(key.Secret), "Created key must authenticate");
 Check(!state.Authenticate(key.Secret + "wrong"), "Wrong key must fail");
@@ -25,12 +26,20 @@ state.Update(new BridgeSettings(port));
 var invocations = 0;
 var wait = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var catalog = new ModelCatalog();
 await using var server = new LocalServer(state, async (prompt, model, seconds, cancellation) =>
 {
     Interlocked.Increment(ref invocations);
     if (prompt == "block") { blocked.TrySetResult(); await wait.Task.WaitAsync(cancellation); }
+    var protocol = System.Text.RegularExpressions.Regex.Match(prompt,"bridge_protocol must equal \\\"([a-f0-9]{32})\\\"");
+    if(protocol.Success)
+    {
+        if(prompt.Contains("RETURN_FINAL_TOOL_TEST"))return new Completion(JsonSerializer.Serialize(new{bridge_protocol=protocol.Groups[1].Value,text="done",tool_calls=Array.Empty<object>()}),model);
+        var tool=prompt.Contains("MALFORMED_TOOL_TEST")?"invented_tool":"echo";
+        return new Completion(JsonSerializer.Serialize(new{bridge_protocol=protocol.Groups[1].Value,text="",tool_calls=new[]{new{name=tool,arguments=new{value="hello"}}}}),model);
+    }
     return new Completion(prompt == "Reply with exactly OK." ? "OK" : prompt, model);
-});
+},catalog);
 await server.StartAsync();
 using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(10) };
 Check((await client.GetAsync("/health")).IsSuccessStatusCode, "Health must work");
@@ -52,7 +61,7 @@ using (var answer = await client.PostAsJsonAsync("/v1/chat/completions", Body("R
 {
     using var json = JsonDocument.Parse(await answer.Content.ReadAsStringAsync());
     Check(answer.IsSuccessStatusCode && json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() == "OK", "Chat response translation failed");
-    Check(!json.RootElement.TryGetProperty("usage", out _), "Must not invent token counts");
+    Check(json.RootElement.GetProperty("usage").ValueKind == JsonValueKind.Null, "Must not invent token counts");
 }
 using (var answer = await client.PostAsJsonAsync("/v1/chat/completions", Body("hello", true)))
 {
@@ -66,18 +75,63 @@ using (var answer = await client.PostAsJsonAsync("/v1/messages", Body("hello")))
     Check(json.RootElement.GetProperty("content")[0].GetProperty("text").GetString() == "hello", "Native response failed");
 }
 var before = invocations;
-Check((await client.PostAsJsonAsync("/v1/chat/completions", new { model = "claude-web", messages = new[] { new { role = "user", content = "hello" } }, max_tokens = 16 })).StatusCode == HttpStatusCode.BadRequest, "Unsupported token budget must be explicit");
+using(var answer=await client.PostAsJsonAsync("/v1/chat/completions",new{model="claude-web",messages=new[]{new{role="user",content="hello"}},max_tokens=16,temperature=0.7,store=false,stream_options=new{include_usage=true}}))
+{
+ Check(answer.IsSuccessStatusCode,"Pi compatibility fields must be accepted");
+ Check(answer.Headers.GetValues("X-Local-Claude-Compatibility").Single().Contains("token_budget_as_prompt_hint") && answer.Headers.GetValues("X-Local-Claude-Compatibility").Single().Contains("temperature_not_enforced"),"Compatibility caveats must be explicit");
+}
+before=invocations;
 Check((await client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = new[] { new { type = "image_url", image_url = "hidden" } } } } })).StatusCode == HttpStatusCode.BadRequest, "Images must not silently drop");
 Check(invocations == before, "Invalid requests must not reach Claude");
-Check((await client.PostAsJsonAsync("/v1/messages", Body("hello", true))).StatusCode == HttpStatusCode.BadRequest, "Unsupported native streaming must reject");
+using(var answer=await client.PostAsJsonAsync("/v1/messages",Body("hello",true)))
+ Check(answer.IsSuccessStatusCode && (await answer.Content.ReadAsStringAsync()).Contains("event: message_stop"),"Buffered native SSE must finish");
 using (var answer = await client.PostAsync("/v1/messages", new StringContent("not json", System.Text.Encoding.UTF8, "application/json")))
     Check(answer.StatusCode == HttpStatusCode.BadRequest, "Malformed JSON must reject");
-using (var answer = await client.PostAsJsonAsync("/v1/messages", Body("x" + new string('x', 300000))))
+using (var answer = await client.PostAsJsonAsync("/v1/messages", Body("x" + new string('x', 1200000))))
     Check(answer.StatusCode == HttpStatusCode.RequestEntityTooLarge, "Large body must reject");
 var first = client.PostAsJsonAsync("/v1/messages", Body("block"));
 await blocked.Task.WaitAsync(TimeSpan.FromSeconds(5));
 Check((await client.PostAsJsonAsync("/v1/messages", Body("second"))).StatusCode == HttpStatusCode.TooManyRequests, "Concurrent generation must reject");
 wait.TrySetResult(); using (var answer = await first) Check(answer.IsSuccessStatusCode, "Original request must finish");
+catalog.Replace(new[]{new WebModel("claude-sonnet-5-5","Sonnet 5.5"),new WebModel("claude-haiku-5-5","Haiku 5.5")});
+using(var answer=await client.GetAsync("/v1/models"))
+{
+ using var json=JsonDocument.Parse(await answer.Content.ReadAsStringAsync());
+ Check(json.RootElement.GetProperty("data").GetArrayLength()==2,"Discovered models must replace the alias-only listing");
+}
+using(var answer=await client.PostAsJsonAsync("/v1/chat/completions",new{model="claude-haiku-5-5",messages=new[]{new{role="user",content="hello"}}}))
+{
+ using var json=JsonDocument.Parse(await answer.Content.ReadAsStringAsync());Check(json.RootElement.GetProperty("model").GetString()=="claude-haiku-5-5","Requests must route the discovered model");
+}
+Check((await client.PostAsJsonAsync("/v1/chat/completions",new{model="claude-unknown-9",messages=new[]{new{role="user",content="hi"}}})).StatusCode==HttpStatusCode.NotFound,"Unknown models must reject");
+var toolDefinition=new{type="function",function=new{name="echo",description="Echo a value",parameters=new{type="object",properties=new{value=new{type="string"}},required=new[]{"value"}}}};
+object ToolBody(string text,bool stream=false)=>new{model="claude-web",messages=new[]{new{role="user",content=text}},tools=new[]{toolDefinition},tool_choice="required",parallel_tool_calls=false,stream,stream_options=new{include_usage=true},max_completion_tokens=2048};
+string callId;
+using(var answer=await client.PostAsJsonAsync("/v1/chat/completions",ToolBody("CALL_TEST_TOOL")))
+{
+ using var json=JsonDocument.Parse(await answer.Content.ReadAsStringAsync());
+ Check(answer.IsSuccessStatusCode && json.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString()=="tool_calls","Tool turn must finish with tool_calls");
+ var call=json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("tool_calls")[0];callId=call.GetProperty("id").GetString()!;
+ Check(call.GetProperty("function").GetProperty("name").GetString()=="echo" && JsonDocument.Parse(call.GetProperty("function").GetProperty("arguments").GetString()!).RootElement.GetProperty("value").GetString()=="hello","Tool arguments must remain JSON");
+}
+using(var answer=await client.PostAsJsonAsync("/v1/chat/completions",ToolBody("CALL_TEST_TOOL",true)))
+{
+ var text=await answer.Content.ReadAsStringAsync();Check(text.Contains("\"tool_calls\"")&&text.Contains("\"usage\":null")&&text.EndsWith("data: [DONE]\n\n"),"Tool SSE and include_usage must be SDK compatible");
+}
+var history=new object[]{new{role="user",content="CALL_TEST_TOOL"},new{role="assistant",content=(string?)null,tool_calls=new[]{new{id=callId,type="function",function=new{name="echo",arguments="{\"value\":\"hello\"}"}}}},new{role="tool",tool_call_id=callId,content="RETURN_FINAL_TOOL_TEST: hello"}};
+using(var answer=await client.PostAsJsonAsync("/v1/chat/completions",new{model="claude-web",messages=history,tools=new[]{toolDefinition}}))
+{
+ using var json=JsonDocument.Parse(await answer.Content.ReadAsStringAsync());Check(answer.IsSuccessStatusCode&&json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()=="done","Tool result history must complete another turn");
+}
+Check((await client.PostAsJsonAsync("/v1/chat/completions",ToolBody("MALFORMED_TOOL_TEST"))).StatusCode==HttpStatusCode.BadGateway,"Invented tools must not be forwarded");
+using(var nativeAuth=new HttpRequestMessage(HttpMethod.Get,"/v1/models"))
+{
+ nativeAuth.Headers.Add("x-api-key",key.Secret);nativeAuth.Headers.Authorization=null;
+ // Default request auth is overridden explicitly so only the native key is present.
+ client.DefaultRequestHeaders.Authorization=null;
+ Check((await client.SendAsync(nativeAuth)).IsSuccessStatusCode,"Native x-api-key must authenticate");
+ client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",key.Secret);
+}
 state.Revoke(key.Key.Id);
 Check((await client.GetAsync("/v1/models")).StatusCode == HttpStatusCode.Unauthorized, "Revoked key must stop working");
 await server.DisposeAsync();
@@ -86,5 +140,14 @@ var secondKey = state.CreateKey("Second client");
 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secondKey.Secret);
 await server.StartAsync();
 Check((await client.PostAsJsonAsync("/v1/chat/completions", Body("hello"))).StatusCode == HttpStatusCode.NotFound, "OpenAI toggle must remove route");
+await server.DisposeAsync();
+state.Update(new BridgeSettings(port,RequireApiKey:false));
+client.DefaultRequestHeaders.Authorization=null;
+await server.StartAsync();
+Check((await client.GetAsync("/v1/models")).IsSuccessStatusCode,"No-key mode must allow missing credentials");
+using(var browser=new HttpRequestMessage(HttpMethod.Get,"/v1/models"))
+{
+ browser.Headers.Add("Origin","https://example.com");Check((await client.SendAsync(browser)).StatusCode==HttpStatusCode.Forbidden,"No-key mode must preserve browser-origin restrictions");
+}
 await server.DisposeAsync();
 Console.WriteLine($"PASS: {count} integration assertions. Synthetic backend only; no Claude account requests.");

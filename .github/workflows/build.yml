@@ -19,16 +19,15 @@ jobs:
           node-version: '22'
       - run: dotnet build ClaudeLocalBridge.csproj -c Release
       - run: dotnet run --project tests/Bridge.Tests.csproj -c Release
+      - run: dotnet run --project tests/Updates/Updates.Tests.csproj -c Release
       - run: node tests/stream.test.cjs
       - run: node tests/web-transport.test.cjs
-      - run: dotnet publish ClaudeLocalBridge.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish/win-x64
+      - run: node tests/models.test.cjs
       - shell: pwsh
-        run: |
-          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/LocalClaudeBridge-Windows-x64.zip
-          (Get-FileHash artifacts/LocalClaudeBridge-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() + '  LocalClaudeBridge-Windows-x64.zip' | Set-Content artifacts/SHA256SUMS.txt
+        run: ./scripts/Build-Release.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: LocalClaudeBridge-Windows-x64
           path: |
-            artifacts/LocalClaudeBridge-Windows-x64.zip
-            artifacts/SHA256SUMS.txt
+            artifacts/release/*/LocalClaudeBridge-Windows-x64.zip
+            artifacts/release/*/SHA256SUMS.txt

@@ -13,8 +13,10 @@ public partial class MainWindow : Window
     private BridgeState state = null!;
     private WebSession session = null!;
     private LocalServer server = null!;
+    private readonly ModelCatalog models = new();
     private bool initialized, busy, closing;
     private bool startupTestPending = Environment.GetCommandLineArgs().Contains("--quick-test");
+    private bool startupSessionPending = true;
     private readonly List<object> report = [];
 
     public MainWindow()
@@ -36,8 +38,10 @@ public partial class MainWindow : Window
         {
             if (closing) return;
             e.Cancel = true; closing = true;
+            updateCancellation?.Cancel();
             try { if (server is not null) await server.DisposeAsync(); }
-            finally { if (session is not null) session.Dispose(); Close(); }
+            catch(Exception){ }
+            finally { if (session is not null) session.Dispose(); updater.Dispose(); Close(); }
         };
     }
     private async void Initialize(object sender, RoutedEventArgs e)
@@ -45,22 +49,35 @@ public partial class MainWindow : Window
         try
         {
             state = new BridgeState();
+            InitializeUpdates();
+            DarkModeBox.IsChecked = state.Settings.DarkMode;
+            RequireKeyBox.IsChecked = state.Settings.RequireApiKey;
+            ToolCallingBox.IsChecked = state.Settings.ToolCalling;
+            Theme.Apply(this,state.Settings.DarkMode);
             PortBox.Text = state.Settings.Port.ToString();
             OpenAiBox.IsChecked = state.Settings.OpenAi;
             ModelBox.Text = state.Settings.Model;
             TimeoutBox.Text = state.Settings.TimeoutSeconds.ToString();
             RefreshKeys();
-            session = new WebSession(Browser);
-            server = new LocalServer(state, session.CompleteAsync);
+            session = new WebSession(Browser,models);
+            server = new LocalServer(state, session.CompleteAsync,models);
             await session.InitializeAsync();
+            session.SetDarkMode(state.Settings.DarkMode);
             Browser.NavigationCompleted += async (_, args) =>
             {
-                if (!startupTestPending || !args.IsSuccess || !initialized || Browser.Source?.Host != "claude.ai" || !Browser.Source.AbsolutePath.StartsWith("/new")) return;
-                startupTestPending = false;
-                await Guard(RunQuickTest);
+                if (!startupSessionPending || !args.IsSuccess || !initialized || Browser.Source?.Host != "claude.ai" || !Browser.Source.AbsolutePath.StartsWith("/new")) return;
+                startupSessionPending = false;
+                await Guard(async () =>
+                {
+                    await CheckSession();
+                    if (startupTestPending) { startupTestPending=false; await RunQuickTest(); }
+                    else if (Environment.GetCommandLineArgs().Contains("--start-endpoint")) await StartEndpoint();
+                });
             };
             Browser.CoreWebView2.SourceChanged += (_, _) => BrowserLocationText.Text = Browser.Source?.GetLeftPart(UriPartial.Path) ?? "Claude browser";
             initialized = true;
+            ConfirmUpdateStartup();
+            if(Environment.GetCommandLineArgs().Contains("--install-update"))_=RunUpdateCommandAsync();
             Log("browser", "Regular Claude web session is ready for you to sign in.");
         }
         catch (WebView2RuntimeNotFoundException) { Log("startup_error", "Microsoft Edge WebView2 Runtime is required. Install the Evergreen runtime from Microsoft, then reopen the app."); }
@@ -76,7 +93,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(BridgeState.DataFolder);
-            File.WriteAllText(Path.Combine(BridgeState.DataFolder, "web-session-test.json"), JsonSerializer.Serialize(new { version = "0.1.1", events = report }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(Path.Combine(BridgeState.DataFolder, "web-session-test.json"), JsonSerializer.Serialize(new { version = UpdatePaths.CurrentVersion.ToString(3), events = report }, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -85,12 +102,12 @@ public partial class MainWindow : Window
     {
         if (!initialized) { Log("app", "Browser is still initializing or could not start."); return; }
         if (busy) { Log("app", "Wait for the current app operation to finish."); return; }
-        busy = true; CheckButton.IsEnabled = TestButton.IsEnabled = StartButton.IsEnabled = false;
+        busy = true; CheckButton.IsEnabled = TestButton.IsEnabled = StartButton.IsEnabled = ModelsButton.IsEnabled = false;
         try { await action(); }
         catch (BridgeException ex) { Log(ex.Code, ex.Message); }
         catch (ArgumentException ex) { Log("settings", ex.Message); }
         catch (Exception ex) { Log("operation_error", "Operation failed: " + ex.GetType().Name + ". If starting the endpoint, check whether the port is already in use."); }
-        finally { busy = false; CheckButton.IsEnabled = TestButton.IsEnabled = StartButton.IsEnabled = true; }
+        finally { busy = false; CheckButton.IsEnabled = TestButton.IsEnabled = StartButton.IsEnabled = ModelsButton.IsEnabled = true; }
     }
     private void Login_Click(object sender, RoutedEventArgs e)
     {
@@ -108,11 +125,17 @@ public partial class MainWindow : Window
         if (remembered is not null) OrgBox.SelectedItem = remembered;
         else if (organizations.Count == 1) OrgBox.SelectedIndex = 0;
         Log("session", session.Ready ? "Claude web session verified. Selected workspace is ready; account plan type remains unverified." : organizations.Count == 0 ? "No Claude workspace found. Complete the login in the browser." : "Claude web session verified. Choose the workspace to use.");
+        if(session.Ready)
+        {
+            try { await RefreshModels(); }
+            catch(BridgeException ex) { Log(ex.Code,ex.Message); }
+        }
     }
     private void Org_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (session is null) return;
         session.OrganizationId = (OrgBox.SelectedItem as Organization)?.Id;
+        ModelPicker.ItemsSource = null;
         if (session.OrganizationId is not null)
         {
             try { state.Update(state.Settings with { OrganizationId = session.OrganizationId }); }
@@ -131,7 +154,7 @@ public partial class MainWindow : Window
     private BridgeSettings ReadSettings()
     {
         if (!int.TryParse(PortBox.Text, out var port) || !int.TryParse(TimeoutBox.Text, out var timeout)) throw new ArgumentException("Port and timeout must be whole numbers.");
-        var settings = new BridgeSettings(port, OpenAiBox.IsChecked == true, BridgeState.NormalizeModel(ModelBox.Text), timeout, state.Settings.OrganizationId);
+        var settings = new BridgeSettings(port, OpenAiBox.IsChecked == true, BridgeState.NormalizeModel(ModelBox.Text), timeout, state.Settings.OrganizationId, RequireKeyBox.IsChecked == true, DarkModeBox.IsChecked == true, ToolCallingBox.IsChecked == true, AutoUpdateBox.IsChecked == true);
         BridgeState.Validate(settings); return settings;
     }
     private async void Save_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -147,7 +170,7 @@ public partial class MainWindow : Window
         if (server.Running) return;
         var settings = ReadSettings(); state.Update(settings);
         await server.StartAsync(); EndpointText.Text = $"http://127.0.0.1:{server.Port}/v1";
-        Log("endpoint", "Local endpoint is running. Claude requests require a verified session and an active local API key.");
+        Log("endpoint", state.Settings.RequireApiKey ? "Local endpoint is running with API-key authentication." : "Local endpoint is running without an API key. Access remains limited to this PC.");
     }
     private async void Start_Click(object sender, RoutedEventArgs e) => await Guard(StartEndpoint);
     private async void Stop_Click(object sender, RoutedEventArgs e)
@@ -157,6 +180,24 @@ public partial class MainWindow : Window
         catch (Exception) { Log("endpoint", "Endpoint shutdown could not complete cleanly."); }
     }
     private void RefreshKeys() => KeysBox.ItemsSource = state.Keys;
+    private async void Models_Click(object sender,RoutedEventArgs e)=>await Guard(RefreshModels);
+    private async Task RefreshModels()
+    {
+        var available=await session.DiscoverModelsAsync();
+        ModelPicker.ItemsSource=available;
+        ModelPicker.SelectedItem=available.FirstOrDefault(m=>m.Id==BridgeState.NormalizeModel(ModelBox.Text));
+        Log("models",$"Discovered {available.Count} selectable models from the visible Claude picker: "+string.Join(", ",available.Select(m=>m.Name))+". Remaining quota is not reported.");
+    }
+    private void Model_Changed(object sender,SelectionChangedEventArgs e)
+    {
+        if(ModelPicker.SelectedItem is WebModel model)ModelBox.Text=model.Id;
+    }
+    private void Theme_Click(object sender,RoutedEventArgs e)
+    {
+        if(!initialized)return;
+        var dark=DarkModeBox.IsChecked==true;Theme.Apply(this,dark);session.SetDarkMode(dark);
+        try{state.Update(state.Settings with{DarkMode=dark});}catch(Exception){Log("theme","Theme applied, but its preference could not be saved.");}
+    }
     private async void CreateKey_Click(object sender, RoutedEventArgs e) => await Guard(() =>
     {
         var created = state.CreateKey(KeyNameBox.Text); NewKeyBox.Text = created.Secret;
@@ -179,11 +220,11 @@ public partial class MainWindow : Window
         if (!session.Ready) await CheckSession();
         if (!session.Ready) throw new BridgeException(503, "session_not_ready", "Finish signing in and select your workspace before running the test.");
         await StartEndpoint();
-        var (temporary, secret) = state.CreateKey("Temporary quick test");
+        var temporary = state.Settings.RequireApiKey ? state.CreateKey("Temporary quick test") : ((LocalKey Key, string Secret)?)null;
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(state.Settings.TimeoutSeconds + 10) };
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secret);
+            if(temporary is not null) client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", temporary.Value.Secret);
             Log("test", "Sending one small prompt through the local endpoint to the Claude website…");
             using var response = await client.PostAsJsonAsync($"http://127.0.0.1:{server.Port}/v1/messages", new { model = "claude-web", messages = new[] { new { role = "user", content = "Reply with exactly OK." } } });
             using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -195,6 +236,6 @@ public partial class MainWindow : Window
             var text = result.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
             Log("test_passed", text.Trim() == "OK" ? "PASS: local endpoint returned OK from the Claude web session. Free-plan identity and allowance attribution are not independently verified." : "PASS: Claude web session returned a text response through the local endpoint. Reply differed from OK; free allowance remains unverified.");
         }
-        finally { state.Revoke(temporary.Id); RefreshKeys(); }
+        finally { if(temporary is not null)state.Revoke(temporary.Value.Key.Id); RefreshKeys(); }
     }
 }

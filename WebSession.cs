@@ -12,11 +12,13 @@ public sealed class WebSession : IDisposable
     private readonly Dispatcher dispatcher;
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> pending = [];
     private readonly string script;
-    public string? OrganizationId { get; set; }
+    private readonly ModelCatalog models;
+    private string? organizationId;
+    public string? OrganizationId { get => organizationId; set { if (organizationId != value) models.Clear(); organizationId = value; } }
     public bool Ready => OrganizationId is not null;
-    public WebSession(WebView2 browser)
+    public WebSession(WebView2 browser, ModelCatalog? catalog = null)
     {
-        this.browser = browser; dispatcher = browser.Dispatcher;
+        this.browser = browser; dispatcher = browser.Dispatcher; models = catalog ?? new();
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ClaudeLocalBridge.WebBridge.js")!;
         using var reader = new StreamReader(stream); script = reader.ReadToEnd();
     }
@@ -44,6 +46,18 @@ public sealed class WebSession : IDisposable
         var result = await RpcAsync(new { operation = "session" }, 30, cancellation);
         return result.EnumerateArray().Select(o => new Organization(o.GetProperty("id").GetString()!, o.GetProperty("name").GetString()!))
             .Where(o => Guid.TryParse(o.Id, out _)).ToArray();
+    }
+    public async Task<IReadOnlyList<WebModel>> DiscoverModelsAsync(CancellationToken cancellation = default)
+    {
+        if (!Ready) throw new BridgeException(503,"session_not_ready","Verify the session and select a workspace before refreshing models.");
+        var result = await RpcAsync(new { operation = "models" }, 10, cancellation);
+        models.Replace(result.EnumerateArray().Select(m => new WebModel(m.GetProperty("id").GetString()!, m.GetProperty("name").GetString()!)));
+        return models.Snapshot;
+    }
+    public void SetDarkMode(bool dark)
+    {
+        if (browser.CoreWebView2 is not null) browser.CoreWebView2.Profile.PreferredColorScheme = dark ? CoreWebView2PreferredColorScheme.Dark : CoreWebView2PreferredColorScheme.Light;
+        browser.DefaultBackgroundColor = dark ? System.Drawing.Color.FromArgb(17,21,27) : System.Drawing.Color.FromArgb(244,244,241);
     }
     public Task<Completion> CompleteAsync(string prompt, string model, int timeoutSeconds, CancellationToken cancellation)
     {
@@ -108,6 +122,8 @@ public sealed class WebSession : IDisposable
                     "http_400" => new BridgeException(502, "web_request_rejected", "Claude rejected the web request format or model (HTTP 400). The adapter needs a compatibility update."),
                     "http_404" => new BridgeException(502, "web_route_not_found", "Claude web route or selected model was not found (HTTP 404)."),
                     "incomplete_stream" => new BridgeException(502, "incomplete_stream", "Claude disconnected before the response finished."),
+                    "model_picker_missing" => new BridgeException(503,"model_picker_missing","Open a new chat in the visible Claude page, then refresh models. The model-picker control was not found."),
+                    "no_available_models" => new BridgeException(503,"model_discovery_failed","The model picker did not expose available entries. No model list was invented; open the picker and refresh again."),
                     _ => new BridgeException(502, "web_request_failed", "Claude web request could not complete. Check the visible browser and model setting.")
                 };
                 if (code == "http_401") OrganizationId = null;

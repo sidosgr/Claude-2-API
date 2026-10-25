@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><Version>0.3.0</Version><AssemblyName>LocalClaudeBridge.Updater</AssemblyName></PropertyGroup>
+ <ItemGroup><Compile Include="..\..\UpdateModels.cs" Link="UpdateModels.cs"/><Compile Include="..\..\AppUpdates.cs" Link="AppUpdates.cs"/><Compile Include="..\..\UpdateInstaller.cs" Link="UpdateInstaller.cs"/></ItemGroup>
+</Project>

@@ -33,6 +33,25 @@ globalThis.localClaudeBridgeRun = async function (input, signal) {
     if (!Array.isArray(data)) throw new Error('unexpected_organizations');
     return data.filter(o => typeof o.uuid === 'string').map((o, i) => ({ id: o.uuid, name: typeof o.name === 'string' ? o.name : 'Workspace ' + (i + 1) }));
   }
+  if (input.operation === 'models') {
+    const trigger = [...document.querySelectorAll('button')].find(button => /^Model:\s*(Sonnet|Haiku|Opus|Fable)/i.test(button.getAttribute('aria-label') || ''));
+    if (!trigger) throw new Error('model_picker_missing');
+    const opened = trigger.getAttribute('aria-expanded') !== 'true';
+    if (opened) trigger.click();
+    try {
+      const deadline = Date.now() + 3000;
+      do {
+        const menus = [...document.querySelectorAll('[role="menu"]')].filter(menu => menu.getBoundingClientRect().width > 0);
+        for (const menu of menus) {
+          const models = globalThis.LocalClaudeExtractModels(menu);
+          if (models.length) return models;
+        }
+        await new Promise(resolve => requestAnimationFrame(resolve));
+      } while (Date.now() < deadline && !signal?.aborted);
+      if (signal?.aborted) throw new Error('request_aborted');
+      throw new Error('no_available_models');
+    } finally { if (opened && trigger.isConnected && trigger.getAttribute('aria-expanded') === 'true') trigger.click(); }
+  }
   if (input.operation !== 'complete') throw new Error('unsupported_operation');
   const conversation = crypto.randomUUID();
   const payload = {
@@ -93,4 +112,28 @@ globalThis.LocalClaudeSseParser = class {
     if (eof && !this.stopped && this.buffer.trim()) throw new Error('incomplete_stream');
   }
 };
-if (typeof module !== 'undefined') module.exports = { LocalClaudeSseParser: globalThis.LocalClaudeSseParser };
+globalThis.LocalClaudeExtractModels = function (menu) {
+  const models = new Map();
+  for (const row of menu.querySelectorAll('[role="menuitemradio"], [role="menuitem"], [role="option"]')) {
+    let label = (row.textContent || '').replace(/\s+/g, ' ').trim();
+    let restricted = row.disabled || row.getAttribute('aria-disabled') === 'true' || row.hasAttribute('data-disabled');
+    // Upgrade badges can sit beside a menu item rather than inside it. Include
+    // its owning wrapper, stopping before a shared group containing other models.
+    for (let parent = row.parentElement, depth = 0; parent && parent !== menu && depth < 4; parent = parent.parentElement, depth++) {
+      const peers = [...parent.querySelectorAll('[role="menuitemradio"], [role="menuitem"], [role="option"]')].filter(item => /\b(Sonnet|Haiku|Opus|Fable)\s+\d/i.test(item.textContent || ''));
+      if (peers.length > 1) break;
+      label += ' ' + (parent.textContent || '');
+      restricted ||= parent.getAttribute('aria-disabled') === 'true' || parent.hasAttribute('data-disabled');
+    }
+    for (const attribute of ['aria-label', 'aria-description']) label += ' ' + (row.getAttribute(attribute) || '');
+    // DOM text can join badge and description words ("5.5ProFor...Upgrade").
+    if (restricted || /upgrade|paid plan/i.test(label) || /\b(pro|max)\b/i.test(label)) continue;
+    const match = /\b(Sonnet|Haiku|Opus|Fable)\s+(\d+(?:\.\d+)*)/i.exec(label);
+    if (!match) continue;
+    const declared = row.getAttribute('data-model-id');
+    const id = declared && /^claude-[a-z0-9-]+$/.test(declared) ? declared : 'claude-' + match[1].toLowerCase() + '-' + match[2].replace(/\./g, '-');
+    models.set(id, { id, name: match[1][0].toUpperCase() + match[1].slice(1).toLowerCase() + ' ' + match[2] });
+  }
+  return [...models.values()];
+};
+if (typeof module !== 'undefined') module.exports = { LocalClaudeSseParser: globalThis.LocalClaudeSseParser, LocalClaudeExtractModels: globalThis.LocalClaudeExtractModels };
