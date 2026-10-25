@@ -11,6 +11,8 @@
 
 This confirms signed-in web-session discovery and one local-endpoint-to-Claude generation on Windows. The user supplied the account for a free-account test. Account plan identity, allowance attribution, quota reset behavior, prolonged sessions, and sustained workloads were not independently verified. No unlimited-usage claim is made.
 
+The user also opened Claude in the Codex browser. Its visible page explicitly displayed `Free plan` and `Sonnet 5.5`. This is a separate browser profile; account identity was not programmatically correlated with the app session.
+
 ## Automated verification
 
 - 26 local HTTP integration assertions against a synthetic backend: authentication, wrong/revoked keys, persisted hashes and workspace preferences, Host/Origin restrictions, text response formatting, buffered SSE termination, malformed/unsupported requests, body size, concurrency, and the OpenAI toggle.
