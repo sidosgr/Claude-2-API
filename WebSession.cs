@@ -26,9 +26,9 @@ public sealed class WebSession : IDisposable
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ClaudeLocalBridge.WebBridge.js")!;
         using var reader = new StreamReader(stream); script = reader.ReadToEnd();
     }
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(string? browserFolder=null)
     {
-        var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.Combine(BridgeState.DataFolder, "BrowserProfile"));
+        var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: browserFolder??Path.Combine(BridgeState.DataFolder, "BrowserProfile"));
         await browser.EnsureCoreWebView2Async(environment);
         browser.CoreWebView2.WebMessageReceived += Receive;
         browser.CoreWebView2.NavigationStarting += (_, _) =>

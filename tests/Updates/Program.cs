@@ -23,7 +23,7 @@ byte[] Package(bool unsafePath=false)
  return output.ToArray();
 }
 var package=Package();var sha=Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant();
-JsonElement Metadata(long? size=null,string? digest=null,string? url=null,bool draft=false,bool prerelease=false,string tag="v1.0.0")=>JsonSerializer.SerializeToElement(new{draft,prerelease,tag_name=tag,assets=new[]{new{name=UpdatePaths.AssetName,size=size??package.Length,digest=digest??("sha256:"+sha),browser_download_url=url??"https://github.com/sidosgr/LocalClaudeBridge/releases/download/"+tag+"/"+UpdatePaths.AssetName}}});
+JsonElement Metadata(long? size=null,string? digest=null,string? url=null,bool draft=false,bool prerelease=false,string tag="v1.0.0")=>JsonSerializer.SerializeToElement(new{draft,prerelease,tag_name=tag,assets=new[]{new{name=UpdatePaths.AssetName,size=size??package.Length,digest=digest??("sha256:"+sha),browser_download_url=url??"https://github.com/sidosgr/Claude-2-API/releases/download/"+tag+"/"+UpdatePaths.AssetName}}});
 var release=AppUpdateClient.ParseRelease(Metadata(),new Version(0,9,0))!;
 Check(release.Version=="1.0.0"&&release.Sha256==sha,"Valid stable release must parse");
 Check(AppUpdateClient.ParseRelease(Metadata(),new Version(1,0,0,0))is null,"Version comparison must normalize revision");
@@ -32,7 +32,7 @@ Check(AppUpdateClient.ParseRelease(Metadata(prerelease:true),new Version(0,9,0))
 await ExpectFailure(()=>{AppUpdateClient.ParseRelease(Metadata(size:AppUpdateClient.MaximumPackageSize+1),new Version(0,1,0));return Task.CompletedTask;},"invalid_size");
 await ExpectFailure(()=>{AppUpdateClient.ParseRelease(Metadata(digest:"unknown"),new Version(0,1,0));return Task.CompletedTask;},"missing_digest");
 await ExpectFailure(()=>{AppUpdateClient.ParseRelease(Metadata(url:"https://evil.example/package.zip"),new Version(0,1,0));return Task.CompletedTask;},"invalid_url");
-await ExpectFailure(()=>{AppUpdateClient.ParseRelease(Metadata(url:"https://github.com:4443/sidosgr/LocalClaudeBridge/releases/download/v1.0.0/"+UpdatePaths.AssetName),new Version(0,1,0));return Task.CompletedTask;},"invalid_url");
+await ExpectFailure(()=>{AppUpdateClient.ParseRelease(Metadata(url:"https://github.com:4443/sidosgr/Claude-2-API/releases/download/v1.0.0/"+UpdatePaths.AssetName),new Version(0,1,0));return Task.CompletedTask;},"invalid_url");
 var root=Path.Combine(Path.GetTempPath(),"LocalClaudeBridge-UpdateTests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
 var handler=new FixtureHandler(_=>new HttpResponseMessage(HttpStatusCode.OK){Content=new ByteArrayContent(package)});
 using var http=new HttpClient(handler);using var client=new AppUpdateClient(http,root);

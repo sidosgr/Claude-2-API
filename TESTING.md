@@ -1,5 +1,13 @@
 # Verification record
 
+## Release 0.5.0
+
+- 74 API/profile assertions pass. Profile coverage includes legacy-folder preservation, isolated paths, saved custom names and order, cooldown persistence, one attempt per candidate, disabled/signed-out candidate handling, failover-off, cancellation, and no rotation on non-quota generation errors.
+- The actual WebView2 runtime test verifies cookie and local-storage isolation across two named-profile folders, including a hidden background view, as well as popup opener/close behavior. No real account credentials are used by this test.
+- The existing signed-in account reopened under Default, discovered the same five models, and resumed the local endpoint. A live Sonnet 5.5 request through the profile router returned HTTP 200 and OK.
+- Real usage exhaustion and a second real account have not been exercised; failover behavior uses synthetic quota errors. No unlimited-usage or quota-reset claim is made. Full visual layout checks remain incomplete.
+
+
 ## Release 0.4.2
 
 - 56 API integration assertions passed, including saved thinking defaults, explicit overrides, unchanged low/medium/high/xhigh/max forwarding, and the effective-thinking response header.

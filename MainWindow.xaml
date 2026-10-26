@@ -23,22 +23,37 @@
    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center">
     <StackPanel Orientation="Horizontal"><Ellipse x:Name="ConnectionDot" Width="10" Height="10" Fill="DarkOrange" Margin="0,0,8,0"/><TextBlock x:Name="ConnectionLabel" Text="Claude · Checking connection"/></StackPanel>
     <StackPanel Orientation="Horizontal" Margin="0,6,0,6"><Ellipse x:Name="EndpointDot" Width="10" Height="10" Fill="Gray" Margin="0,0,8,0"/><TextBlock x:Name="EndpointLabel" Text="Local API · Stopped"/></StackPanel>
+    <TextBlock x:Name="HeaderProfileText" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,5" MaxWidth="230" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
     <Button Click="CopyEndpoint_Click" Padding="4" Margin="0" Background="Transparent" BorderThickness="0" HorizontalAlignment="Right" ToolTip="Click to copy the local API base URL. Paste it into your client provider settings."><TextBlock x:Name="EndpointText" Text="Endpoint stopped" FontSize="13"/></Button>
    </StackPanel>
   </DockPanel>
-  <Grid Grid.Row="1">
-   <Grid.ColumnDefinitions><ColumnDefinition Width="430"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+  <Grid x:Name="BodyGrid" Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition x:Name="SettingsColumn" Width="470"/><ColumnDefinition x:Name="BrowserGap" Width="16"/><ColumnDefinition x:Name="BrowserColumn" Width="*"/></Grid.ColumnDefinitions>
    <TabControl x:Name="SettingsTabs" Background="{DynamicResource WindowBrush}" BorderThickness="0">
 <TabItem Header="Account">     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16"><StackPanel>
-      <TextBlock Text="Claude account" FontSize="18" FontWeight="SemiBold"/>
+      <TextBlock Text="Claude account" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="ProfileStatusText" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}"/>
       <TextBlock Text="Your saved Claude session connects automatically. The browser appears when sign-in is needed." Margin="0,8,0,12"/>
       <Button Content="Connect Claude + start API" Click="Connect_Click" Margin="0,0,0,8"/>
-      <CheckBox x:Name="ShowBrowserBox" Content="Show Claude browser  ⓘ" Click="BrowserVisibility_Click" Margin="0,0,0,12" ToolTip="Recommended: off. Hides the browser after the session is verified. Turn on to view Claude; sign-in pages always appear when needed."/>
+      <CheckBox x:Name="ShowBrowserBox" Content="Show internal browser  ⓘ" Click="BrowserVisibility_Click" Margin="0,0,0,12" ToolTip="Recommended: off. Hides the browser after the session is verified. Turn on to view Claude; sign-in pages always appear when needed."/>
       <WrapPanel><Button Content="Open Claude" Click="Login_Click" ToolTip="Opens regular claude.ai. Recommended: email login if your identity provider blocks embedded browsers."/><Button x:Name="CheckButton" Content="Check session" Click="Check_Click"/></WrapPanel>
       <TextBlock Text="Workspace  ⓘ" Margin="0,12,0,4" ToolTip="The first workspace is selected automatically when connecting. You can choose another workspace for the current session."/>
       <ComboBox x:Name="OrgBox" SelectedValuePath="Id" SelectionChanged="Org_Changed" MinHeight="30"/>
       <Button Content="Sign out / clear app session" Click="SignOut_Click" Margin="0,10,0,0" ToolTip="Stops the endpoint and clears only this app’s browser profile. Other browsers are not affected."/>
      </StackPanel></Border></TabItem>
+<TabItem Header="Profiles"><Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16"><StackPanel>
+ <TextBlock Text="Saved profiles" FontSize="18" FontWeight="SemiBold"/>
+ <TextBlock Text="Each profile has a separate saved Claude login. Select a profile to sign in, or create one with a custom name." Margin="0,8,0,10"/>
+ <ListBox x:Name="ProfilesBox" DisplayMemberPath="Label" Height="85" SelectionChanged="ProfileList_Changed"/>
+ <WrapPanel Margin="0,8,0,8"><Button Padding="8,5" Content="Use / sign in" Click="UseProfile_Click"/><Button Padding="8,5" Content="Move up" Click="MoveProfileUp_Click"/><Button Padding="8,5" Content="Move down" Click="MoveProfileDown_Click"/></WrapPanel>
+ <TextBlock Text="Profile name  ⓘ" ToolTip="Use a custom name with 1–60 characters. Names identify local profiles; login data stays in the browser profile."/>
+ <TextBox x:Name="ProfileNameBox" Padding="7" Margin="0,4,0,8"/>
+ <WrapPanel><Button Padding="8,5" Content="Add new profile" Click="AddProfile_Click"/><Button Padding="8,5" Content="Rename selected" Click="RenameProfile_Click"/></WrapPanel>
+ <CheckBox x:Name="ProfileEnabledBox" Content="Enabled for API requests" Click="EnableProfile_Click" Margin="0,12,0,8"/>
+ <Button Padding="8,5" Content="Reset selected profile pause" Click="ResetProfile_Click" HorizontalAlignment="Left" ToolTip="Use after Claude's allowance resets. Clears only this app's local cooldown; it does not change Claude's quota."/>
+ <CheckBox x:Name="ProfileFailoverBox" Content="Switch profiles automatically at a usage limit  ⓘ" Margin="0,14,0,8" ToolTip="Tries the next enabled, signed-in profile once when Claude reports a usage limit. Stops when no eligible profiles remain. Save below to apply."/>
+ <TextBlock Text="Pause a limited profile (minutes)  ⓘ" ToolTip="Recommended: 60. Range: 1–1440. This is a local cooldown, not an estimate of Claude's actual quota reset. The cooldown persists across restarts."/>
+ <DockPanel Margin="0,5,0,0"><Button Padding="8,5" DockPanel.Dock="Right" Content="Save failover" Click="FailoverPreference_Click"/><TextBox x:Name="ProfileCooldownBox" Padding="7" MinWidth="75"/></DockPanel>
+</StackPanel></Border></TabItem>
 <TabItem Header="API">     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="16" Margin="0,12,0,0"><StackPanel>
       <TextBlock Text="Local API" FontSize="18" FontWeight="SemiBold"/>
       <TextBlock Text="Port  ⓘ" Margin="0,10,0,4" ToolTip="TCP port for http://127.0.0.1. Recommended: 8081. Range: 1024–65535. Connections are accepted from this PC only."/>
@@ -80,18 +95,18 @@
       <TextBox x:Name="LogBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="220" Margin="0,12,0,0" Background="#20252B" Foreground="#EEE" Padding="8" FontFamily="Consolas"/>
      </StackPanel></Border></TabItem>
    </TabControl>
-   <Grid Grid.Column="2">
+   <Grid x:Name="BrowserArea" Grid.Column="2">
    <Border x:Name="ConnectionDashboard" Background="{DynamicResource PanelBrush}" CornerRadius="12" Visibility="Collapsed"><StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="460" Margin="32">
     <Image Source="Assets/Bridge.ico" Width="88" Height="88" Margin="0,0,0,20"/>
     <TextBlock Text="Local Claude Bridge" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center"/>
     <TextBlock x:Name="DashboardStatus" Text="Connected and ready for API requests" FontSize="17" Margin="0,16,0,12" HorizontalAlignment="Center"/>
-    <TextBlock Text="Your Claude browser session stays active in the background. Use Show Claude browser to view it, or right-click the tray icon to connect in one click." Foreground="{DynamicResource MutedBrush}" TextAlignment="Center"/>
+    <TextBlock Text="Your Claude browser session stays active in the background. Use Show internal browser to view it, or right-click the tray icon to connect in one click." Foreground="{DynamicResource MutedBrush}" TextAlignment="Center"/>
     <Button Content="Connect Claude + start API" Click="Connect_Click" Margin="0,22,0,0" HorizontalAlignment="Center"/>
    </StackPanel></Border>
    <Grid x:Name="BrowserPanel">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <TextBlock x:Name="BrowserLocationText" Text="Loading claude.ai…" Padding="10" Background="{DynamicResource PanelBrush}" TextTrimming="CharacterEllipsis"/>
-    <wv:WebView2 x:Name="Browser" Grid.Row="1"/>
+    <Grid x:Name="BrowserHost" Grid.Row="1"/>
    </Grid>
    </Grid>
   </Grid>

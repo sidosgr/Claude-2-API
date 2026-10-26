@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Controls;
 using Forms = System.Windows.Forms;
 using Wpf = System.Windows.Controls;
 namespace ClaudeLocalBridge;
@@ -32,12 +33,14 @@ public partial class MainWindow
         return [
             new("Connect Claude + start API",()=>Guard(ConnectAsync)),new("Stop local API",StopEndpointAsync),new("Copy API base URL",()=>Immediate(CopyEndpoint)),
             new("Show Local Claude Bridge",()=>Immediate(ShowApp)),new("Check Claude session",()=>Guard(CheckSession)),new("Refresh available models",()=>Guard(RefreshModels)),
+            new("Profiles",Children:profiles.Profiles.Select(p=>new QuickCommand(p.Name,()=>Guard(()=>UseSavedProfileAsync(p.Id)),p.Id==profiles.ActiveId)).ToArray()),
             new("Default model",Children:models.Snapshot.Select(m=>new QuickCommand(m.Name,()=>Guard(()=>ApplyQuickSettingsAsync(s=>s with{Model=m.Id})),state.Settings.Model==m.Id)).ToArray()),
             new("Thinking level",Children:ThinkingLevels.Select(level=>new QuickCommand(level.Name,()=>Guard(()=>ApplyQuickSettingsAsync(s=>s with{ThinkingLevel=level.Id})),state.Settings.ThinkingLevel==level.Id)).ToArray()),
-            new("-"),Toggle("Dark mode",s=>s.DarkMode,(s,v)=>s with{DarkMode=v}),Toggle("Show Claude browser",s=>s.ShowBrowser,(s,v)=>s with{ShowBrowser=v}),
+            new("-"),Toggle("Dark mode",s=>s.DarkMode,(s,v)=>s with{DarkMode=v}),Toggle("Show internal browser",s=>s.ShowBrowser,(s,v)=>s with{ShowBrowser=v}),
+            Toggle("Automatic profile failover",s=>s.AutomaticProfileFailover,(s,v)=>s with{AutomaticProfileFailover=v}),
             Toggle("Resume API on startup",s=>s.AutoStartEndpoint,(s,v)=>s with{AutoStartEndpoint=v}),Toggle("Check updates on startup",s=>s.CheckUpdatesOnStartup,(s,v)=>s with{CheckUpdatesOnStartup=v}),
             new("API options",Children:[Toggle("OpenAI compatibility",s=>s.OpenAi,(s,v)=>s with{OpenAi=v}),Toggle("Require local API key",s=>s.RequireApiKey,(s,v)=>s with{RequireApiKey=v}),Toggle("Translate tool calls",s=>s.ToolCalling,(s,v)=>s with{ToolCalling=v})]),
-            new("Settings",Children:new[]{"Account","API","Models","Keys","App","Logs"}.Select((label,index)=>new QuickCommand(label,()=>Immediate(()=>{SettingsTabs.SelectedIndex=index;ShowApp();}))).ToArray()),
+            new("Settings",Children:new[]{"Account","Profiles","API","Models","Keys","App","Logs"}.Select((label,index)=>new QuickCommand(label,()=>Immediate(()=>{SettingsTabs.SelectedIndex=index;ShowApp();}))).ToArray()),
             new("Check for updates",CheckUpdatesAsync),new("-"),new("Exit",()=>Immediate(Close))
         ];
     }
@@ -97,7 +100,8 @@ public partial class MainWindow
         OpenAiBox.IsChecked=next.OpenAi;RequireKeyBox.IsChecked=next.RequireApiKey;ToolCallingBox.IsChecked=next.ToolCalling;
         if(before.Model!=next.Model){ModelBox.Text=next.Model;ModelPicker.SelectedItem=models.Snapshot.FirstOrDefault(m=>m.Id==next.Model);}
         ThinkingPicker.SelectedValue=next.ThinkingLevel;
-        Theme.Apply(this,next.DarkMode);session.SetDarkMode(next.DarkMode);SetBrowserVisible(next.ShowBrowser||!session.Ready);RefreshQuickMenus();
+        Theme.Apply(this,next.DarkMode);foreach(var entry in profileSessions.Values)entry.Session.SetDarkMode(next.DarkMode);SetBrowserVisible(next.ShowBrowser);RefreshQuickMenus();
+        ProfileFailoverBox.IsChecked=next.AutomaticProfileFailover;
         if(server.Running&&(before.Model!=next.Model||before.ThinkingLevel!=next.ThinkingLevel||before.OpenAi!=next.OpenAi||before.RequireApiKey!=next.RequireApiKey||before.ToolCalling!=next.ToolCalling))
         {await server.DisposeAsync();await server.StartAsync();}
         UpdateConnectionStatus();Log("settings","Quick setting saved and applied.");
@@ -117,8 +121,12 @@ public partial class MainWindow
     private void ShowApp(){Show();WindowState=WindowState.Normal;Activate();}
     private async Task ConnectAsync()
     {
-        if(!session.Ready) await CheckSession();
-        if(!session.Ready){SetBrowserVisible(true);ShowApp();Log("connection","Sign in to Claude to finish connecting.");return;}
+        if(!session.Ready)
+        {
+            try{await CheckSession();}
+            catch(BridgeException ex){RevealInternalBrowser();ShowApp();Log(ex.Code,ex.Message);return;}
+        }
+        if(!session.Ready){RevealInternalBrowser();ShowApp();Log("connection","Sign in to Claude to finish connecting.");return;}
         await StartEndpoint();
     }
     private async void Connect_Click(object sender,RoutedEventArgs e)=>await Guard(ConnectAsync);
@@ -127,7 +135,7 @@ public partial class MainWindow
         if(state is null)return;
         var show=ShowBrowserBox.IsChecked==true;
         state.Update(state.Settings with {ShowBrowser=show});
-        SetBrowserVisible(show||session?.Ready!=true);
+        SetBrowserVisible(show);
     }
     private void StartupPreference_Click(object sender,RoutedEventArgs e)
     {
@@ -135,8 +143,13 @@ public partial class MainWindow
     }
     private void SetBrowserVisible(bool visible)
     {
-        BrowserPanel.Visibility=visible?Visibility.Visible:Visibility.Hidden;
-        ConnectionDashboard.Visibility=visible?Visibility.Collapsed:Visibility.Visible;
+        BrowserArea.Visibility=visible?Visibility.Visible:Visibility.Hidden;
+        BrowserArea.Width=visible?double.NaN:700;
+        SettingsColumn.Width=visible?new GridLength(470):new GridLength(1,GridUnitType.Star);
+        BrowserGap.Width=new GridLength(visible?16:0);
+        BrowserColumn.Width=visible?new GridLength(1,GridUnitType.Star):new GridLength(0);
+        Grid.SetColumnSpan(SettingsTabs,visible?1:3);
+        ConnectionDashboard.Visibility=Visibility.Collapsed;
     }
     private void UpdateConnectionStatus()
     {
@@ -148,6 +161,5 @@ public partial class MainWindow
         if(state is not null)EndpointText.Text=$"http://127.0.0.1:{(running?server!.Port:state.Settings.Port)}/v1";
         DashboardStatus.Text=connected?running?"Connected and ready for API requests":"Claude connected · API stopped":"Sign in to connect Claude";
         if(tray is not null)tray.Text=connected&&running?"Local Claude Bridge · Connected · API running":connected?"Local Claude Bridge · Connected · API stopped":"Local Claude Bridge · Sign-in required";
-        if(!connected&&initialized)SetBrowserVisible(true);
     }
 }

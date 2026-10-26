@@ -183,3 +183,5 @@ await using(var thinkingServer=new LocalServer(state,(_,_,_,_)=>throw new Except
  }
 }
 Console.WriteLine($"PASS: {count} integration assertions. Synthetic backend only; no Claude account requests.");
+await ProfileTests.Run(Check);
+Console.WriteLine($"PASS: {count} total API/profile assertions. Failover is tested with synthetic quota responses.");

@@ -40,7 +40,7 @@ public partial class MainWindow : Window
             updateCancellation?.Cancel();
             try { if (server is not null) await server.DisposeAsync(); }
             catch(Exception){ }
-            finally { tray?.Dispose(); if (session is not null) session.Dispose(); updater.Dispose(); Close(); }
+            finally { tray?.Dispose(); foreach(var entry in profileSessions.Values)entry.Session.Dispose(); updater.Dispose(); Close(); }
         };
     }
     private async void Initialize(object sender, RoutedEventArgs e)
@@ -62,41 +62,16 @@ public partial class MainWindow : Window
             ModelBox.Text = state.Settings.Model;
             TimeoutBox.Text = state.Settings.TimeoutSeconds.ToString();
             RefreshKeys();
-            session = new WebSession(Browser,models);
-            server = new LocalServer(state, session.CompleteAsync,models,session.CompleteWithThinkingAsync);
-            session.ConnectionChanged += () => Dispatcher.Invoke(UpdateConnectionStatus);
-            session.LoginWindowClosed += async () =>
-            {
-                // Let the opener finish its sign-in callback before reloading.
-                await Task.Delay(750);
-                if(closing||session.Ready)return;
-                SetBrowserVisible(true);
-                Log("login","Sign-in window closed. Reopening Claude to check the saved session…");
-                Browser.CoreWebView2.Navigate("https://claude.ai/new");
-            };
-            session.LoginWindowFailed += () => Log("login","The sign-in window could not open. Try Open Claude again, or use Claude’s email sign-in option.");
-            Browser.NavigationCompleted += async (_, args) =>
-            {
-                if (!initialized||closing)return;
-                if(!args.IsSuccess){UpdateConnectionStatus();Log("browser","The page did not load. Use Open Claude to retry.");return;}
-                if(Browser.Source?.Host!="claude.ai"){UpdateConnectionStatus();Log("login","Complete sign-in in the browser. Use Open Claude if a previous login attempt left this page blank.");return;}
-                if (!Browser.Source.AbsolutePath.StartsWith("/new") && !Browser.Source.AbsolutePath.StartsWith("/chat/") && !Browser.Source.AbsolutePath.StartsWith("/login")) { SetBrowserVisible(true); return; }
-                for(var retry=0;busy&&retry<40&&!closing;retry++)await Task.Delay(250);
-                if(busy||closing)return;
-                await Guard(async () =>
-                {
-                    await CheckSession();
-                    if (startupTestPending) { startupTestPending=false; await RunQuickTest(); }
-                    else if (session.Ready && (Environment.GetCommandLineArgs().Contains("--start-endpoint") || state.Settings.AutoStartEndpoint && state.Settings.EndpointEnabled)) await StartEndpoint();
-                });
-            };
-            initialized = true;
-            InitializeTray();
-            await session.InitializeAsync();
-            session.SetDarkMode(state.Settings.DarkMode);
-            UpdateConnectionStatus();
-            Browser.CoreWebView2.SourceChanged += (_, _) => BrowserLocationText.Text = Browser.Source?.GetLeftPart(UriPartial.Path) ?? "Claude browser";
-            ConfirmUpdateStartup();
+            profiles=new ProfileStore();profileRouter=new ProfileRouter(profiles);
+            ProfileFailoverBox.IsChecked=state.Settings.AutomaticProfileFailover;
+            ProfileCooldownBox.Text=state.Settings.ProfileCooldownMinutes.ToString();
+            busy=true;
+            var initial=await EnsureProfileAsync(profiles.ActiveId,CancellationToken.None,false);SelectProfile(initial);
+            server=new LocalServer(state,(prompt,model,seconds,token)=>CompleteProfilesAsync(prompt,model,seconds,new(),token),models,CompleteProfilesAsync);
+            initialized=true;InitializeTray();ConfirmUpdateStartup();
+            try{await initial.Loaded.Task.WaitAsync(TimeSpan.FromSeconds(30));}catch(TimeoutException){ }
+            busy=false;
+            await Guard(async()=>{await CheckSession();await ResumeEndpointAsync();});
             if(Environment.GetCommandLineArgs().Contains("--install-update"))_=RunUpdateCommandAsync();
             Log("browser", "Regular Claude web session is ready for you to sign in.");
         }
@@ -121,7 +96,7 @@ public partial class MainWindow : Window
     private async Task Guard(Func<Task> action)
     {
         if (!initialized) { Log("app", "Browser is still initializing or could not start."); return; }
-        if (busy) { Log("app", "Wait for the current app operation to finish."); return; }
+        if (busy||routing) { Log("app", "Wait for the current app operation or API request to finish."); return; }
         busy = true; CheckButton.IsEnabled = TestButton.IsEnabled = StartButton.IsEnabled = ModelsButton.IsEnabled = false;
         try { await action(); }
         catch (BridgeException ex) { Log(ex.Code, ex.Message); }
@@ -132,8 +107,8 @@ public partial class MainWindow : Window
     private void Login_Click(object sender, RoutedEventArgs e)
     {
         if (!initialized || busy) return;
-        SetBrowserVisible(true);
-        Browser.CoreWebView2.Navigate("https://claude.ai/login");
+        RevealInternalBrowser();
+        Browser.CoreWebView2.Navigate("https://claude.ai/new");
     }
     private async void Check_Click(object sender, RoutedEventArgs e) => await Guard(CheckSession);
     private async Task CheckSession()
@@ -141,9 +116,10 @@ public partial class MainWindow : Window
         Log("session", "Checking the signed-in Claude web session…");
         OrgBox.ItemsSource = null;
         var organizations = await session.CheckAsync();
+        profileSessions[profiles.ActiveId].Organizations=organizations;
         OrgBox.ItemsSource = organizations;
         if (organizations.Count > 0) OrgBox.SelectedIndex = 0;
-        SetBrowserVisible(!session.Ready || state.Settings.ShowBrowser);
+        SetBrowserVisible(state.Settings.ShowBrowser);
         UpdateConnectionStatus();
         Log("session", session.Ready ? "Claude web session verified. Selected workspace is ready; account plan type remains unverified." : organizations.Count == 0 ? "No Claude workspace found. Complete the login in the browser." : "Claude web session verified. Choose the workspace to use.");
         if(session.Ready)
@@ -154,7 +130,7 @@ public partial class MainWindow : Window
     }
     private void Org_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (session is null) return;
+        if (session is null||changingProfile) return;
         session.OrganizationId = (OrgBox.SelectedItem as Organization)?.Id;
         ModelPicker.ItemsSource = null;
         if (session.OrganizationId is not null)
@@ -204,7 +180,7 @@ public partial class MainWindow : Window
     private async void Stop_Click(object sender, RoutedEventArgs e)=>await StopEndpointAsync();
     private async Task StopEndpointAsync()
     {
-        if (!initialized) return;
+        if (!initialized||routing) return;
         try { await server.DisposeAsync(); state.Update(state.Settings with { EndpointEnabled=false }); EndpointText.Text = "Endpoint stopped"; UpdateConnectionStatus(); Log("endpoint", "Endpoint stopped. Automatic endpoint restart is disabled until you connect again."); }
         catch (Exception) { Log("endpoint", "Endpoint shutdown could not complete cleanly."); }
     }
@@ -213,6 +189,7 @@ public partial class MainWindow : Window
     private async Task RefreshModels()
     {
         var available=await session.DiscoverModelsAsync();
+        models.Replace(available);
         ModelPicker.ItemsSource=available;
         ModelPicker.SelectedItem=available.FirstOrDefault(m=>m.Id==BridgeState.NormalizeModel(ModelBox.Text));
         Log("models",$"Discovered {available.Count} selectable models from the visible Claude picker: "+string.Join(", ",available.Select(m=>m.Name))+". Remaining quota is not reported.");
@@ -255,6 +232,7 @@ public partial class MainWindow : Window
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(state.Settings.TimeoutSeconds + 10) };
+            internalTest=true;
             if(temporary is not null) client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", temporary.Value.Secret);
             Log("test", "Sending one small prompt through the local endpoint to the Claude website…");
             using var response = await client.PostAsJsonAsync($"http://127.0.0.1:{server.Port}/v1/messages", new { model = "claude-web", messages = new[] { new { role = "user", content = "Reply with exactly OK." } } });
@@ -267,6 +245,6 @@ public partial class MainWindow : Window
             var text = result.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
             Log("test_passed", text.Trim() == "OK" ? "PASS: local endpoint returned OK from the Claude web session. Free-plan identity and allowance attribution are not independently verified." : "PASS: Claude web session returned a text response through the local endpoint. Reply differed from OK; free allowance remains unverified.");
         }
-        finally { if(temporary is not null)state.Revoke(temporary.Value.Key.Id); RefreshKeys(); }
+        finally { internalTest=false; if(temporary is not null)state.Revoke(temporary.Value.Key.Id); RefreshKeys(); }
     }
 }

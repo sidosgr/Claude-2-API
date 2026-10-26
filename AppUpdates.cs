@@ -21,7 +21,7 @@ public sealed class AppUpdateClient:IDisposable
     public async Task<UpdateRelease?> CheckAsync(Version current,CancellationToken cancellation=default)
     {
         using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        using var response=await GetAsync(new Uri("https://api.github.com/repos/sidosgr/LocalClaudeBridge/releases/latest"),true,timeout.Token);
+        using var response=await GetAsync(new Uri("https://api.github.com/repos/sidosgr/Claude-2-API/releases/latest"),true,timeout.Token);
         if(response.StatusCode==HttpStatusCode.NotFound)return null;
         if(response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)throw new UpdateException("github_rate_limit","GitHub declined the update check. Try again later.");
         if(!response.IsSuccessStatusCode)throw new UpdateException("check_failed","The update service could not be reached.");
@@ -44,7 +44,7 @@ public sealed class AppUpdateClient:IDisposable
             var digest=asset.GetProperty("digest").GetString()??"";
             if(!Regex.IsMatch(digest,@"^sha256:[a-fA-F0-9]{64}$"))throw new UpdateException("missing_digest","The release is missing a valid SHA-256 digest.");
             var url=new Uri(asset.GetProperty("browser_download_url").GetString()??"",UriKind.Absolute);
-            if(url.Scheme!="https"||!url.IsDefaultPort||url.Host!="github.com"||url.UserInfo.Length!=0||url.Query.Length!=0||url.Fragment.Length!=0||url.AbsolutePath!="/sidosgr/LocalClaudeBridge/releases/download/"+tag+"/"+UpdatePaths.AssetName)
+            if(url.Scheme!="https"||!url.IsDefaultPort||url.Host!="github.com"||url.UserInfo.Length!=0||url.Query.Length!=0||url.Fragment.Length!=0||url.AbsolutePath!="/sidosgr/Claude-2-API/releases/download/"+tag+"/"+UpdatePaths.AssetName)
                 throw new UpdateException("invalid_url","The update package URL does not match this project's release.");
             return new(version.ToString(3),tag,url,size,digest[7..].ToLowerInvariant());
         }

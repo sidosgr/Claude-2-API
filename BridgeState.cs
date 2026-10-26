@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 namespace ClaudeLocalBridge;
 
-public sealed record BridgeSettings(int Port = 8081, bool OpenAi = true, string Model = "claude-sonnet-5-5", int TimeoutSeconds = 120, string? OrganizationId = null, bool RequireApiKey = true, bool DarkMode = true, bool ToolCalling = true, bool CheckUpdatesOnStartup = true, bool AutoStartEndpoint = true, bool EndpointEnabled = false, bool ShowBrowser = false, string ThinkingLevel = "off");
+public sealed record BridgeSettings(int Port = 8081, bool OpenAi = true, string Model = "claude-sonnet-5-5", int TimeoutSeconds = 120, string? OrganizationId = null, bool RequireApiKey = true, bool DarkMode = true, bool ToolCalling = true, bool CheckUpdatesOnStartup = true, bool AutoStartEndpoint = true, bool EndpointEnabled = false, bool ShowBrowser = false, string ThinkingLevel = "off", bool AutomaticProfileFailover = true, int ProfileCooldownMinutes = 60);
 public sealed record LocalKey(string Id, string Name, string Prefix, string Hash) { public string Label => $"{Name} · {Prefix}…"; }
 public sealed record Organization(string Id, string Name);
 public sealed record FunctionCall(string Id, string Name, string Arguments);
@@ -54,6 +54,7 @@ public sealed class BridgeState
     public static string NormalizeModel(string model) => model.Trim() == "claude-sonnet-5.5" ? "claude-sonnet-5-5" : model.Trim();
     public static void Validate(BridgeSettings value)
     {
+        if(value.ProfileCooldownMinutes is <1 or >1440)throw new ArgumentException("Profile cooldown must be between 1 and 1440 minutes.");
         if(value.ThinkingLevel is not ("off" or "low" or "medium" or "high" or "xhigh" or "max"))throw new ArgumentException("Choose a supported thinking level.");
         if (value.Port is < 1024 or > 65535) throw new ArgumentException("Port must be between 1024 and 65535.");
         if (value.TimeoutSeconds is < 15 or > 600) throw new ArgumentException("Timeout must be between 15 and 600 seconds.");

@@ -125,7 +125,11 @@ globalThis.LocalClaudeSseParser = class {
       let value;
       try { value = JSON.parse(data); } catch { throw new Error('invalid_stream_json'); }
       const type = value.type || lines.find(l => l.startsWith('event:'))?.slice(6).trim();
-      if (type === 'error' || value.error) throw new Error('upstream_stream_error');
+      if (type === 'error' || value.error) {
+        const kind = value.error?.type;
+        if (kind === 'rate_limit_error' || kind === 'usage_limit_error') throw new Error('http_429');
+        throw new Error('upstream_stream_error');
+      }
       if (type === 'message_start' && typeof value.message?.model === 'string') this.model = value.message.model;
       if (type === 'content_block_delta' && value.delta?.type === 'text_delta' && typeof value.delta.text === 'string') this.text += value.delta.text;
       if (typeof value.completion === 'string') this.text += value.completion;
