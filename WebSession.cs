@@ -14,7 +14,11 @@ public sealed class WebSession : IDisposable
     private readonly string script;
     private readonly ModelCatalog models;
     private string? organizationId;
-    public string? OrganizationId { get => organizationId; set { if (organizationId != value) models.Clear(); organizationId = value; } }
+    private WebPopupHost? popups;
+    public event Action? ConnectionChanged;
+    public event Action? LoginWindowClosed;
+    public event Action? LoginWindowFailed;
+    public string? OrganizationId { get => organizationId; set { if (organizationId == value) return; models.Clear(); organizationId = value; ConnectionChanged?.Invoke(); } }
     public bool Ready => OrganizationId is not null;
     public WebSession(WebView2 browser, ModelCatalog? catalog = null)
     {
@@ -33,17 +37,21 @@ public sealed class WebSession : IDisposable
             foreach (var item in pending.Values) item.TrySetException(new BridgeException(503, "page_changed", "Claude page changed during the request. Check the session and try again."));
             pending.Clear();
         };
-        browser.CoreWebView2.NewWindowRequested += (_, e) =>
-        {
-            e.Handled = true;
-            if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && uri.Scheme == "https") browser.CoreWebView2.Navigate(e.Uri);
-        };
-        browser.CoreWebView2.Navigate("https://claude.ai/login");
+        popups=new WebPopupHost(environment,System.Windows.Window.GetWindow(browser));
+        popups.PopupClosed+=()=>LoginWindowClosed?.Invoke();
+        popups.PopupFailed+=()=>LoginWindowFailed?.Invoke();
+        popups.Attach(browser.CoreWebView2);
+        browser.CoreWebView2.Navigate("https://claude.ai/new");
     }
     public async Task<IReadOnlyList<Organization>> CheckAsync(CancellationToken cancellation = default)
     {
         OrganizationId = null;
-        var result = await RpcAsync(new { operation = "session" }, 30, cancellation);
+        JsonElement result;
+        try { result=await RpcAsync(new { operation = "session" },30,cancellation); }
+        catch(BridgeException ex) when(ex.Status==403)
+        {
+            throw new BridgeException(403,"session_check_forbidden","Claude rejected the session check (HTTP 403). Complete sign-in in the browser, including any verification, then click Connect. No generation request was sent.");
+        }
         return result.EnumerateArray().Select(o => new Organization(o.GetProperty("id").GetString()!, o.GetProperty("name").GetString()!))
             .Where(o => Guid.TryParse(o.Id, out _)).ToArray();
     }
@@ -60,14 +68,16 @@ public sealed class WebSession : IDisposable
         browser.DefaultBackgroundColor = dark ? System.Drawing.Color.FromArgb(17,21,27) : System.Drawing.Color.FromArgb(244,244,241);
     }
     public Task<Completion> CompleteAsync(string prompt, string model, int timeoutSeconds, CancellationToken cancellation)
+        =>CompleteWithThinkingAsync(prompt,model,timeoutSeconds,new(),cancellation);
+    public Task<Completion> CompleteWithThinkingAsync(string prompt, string model, int timeoutSeconds, ThinkingOptions thinking, CancellationToken cancellation)
     {
-        if (dispatcher.CheckAccess()) return CompleteOnUiAsync(prompt, model, timeoutSeconds, cancellation);
-        return dispatcher.InvokeAsync(() => CompleteOnUiAsync(prompt, model, timeoutSeconds, cancellation)).Task.Unwrap();
+        if (dispatcher.CheckAccess()) return CompleteOnUiAsync(prompt, model, timeoutSeconds, thinking,cancellation);
+        return dispatcher.InvokeAsync(() => CompleteOnUiAsync(prompt, model, timeoutSeconds, thinking,cancellation)).Task.Unwrap();
     }
-    private async Task<Completion> CompleteOnUiAsync(string prompt, string model, int timeoutSeconds, CancellationToken cancellation)
+    private async Task<Completion> CompleteOnUiAsync(string prompt, string model, int timeoutSeconds, ThinkingOptions thinking, CancellationToken cancellation)
     {
         if (OrganizationId is null) throw new BridgeException(503, "session_not_ready", "Sign in to Claude and click Check session in the app.");
-        var result = await RpcAsync(new { operation = "complete", organization = OrganizationId, prompt, model }, timeoutSeconds, cancellation);
+        var result = await RpcAsync(new { operation = "complete", organization = OrganizationId, prompt, model, thinking_mode=thinking.Mode,effort=thinking.Effort }, timeoutSeconds, cancellation);
         return new Completion(result.GetProperty("text").GetString()!, result.GetProperty("model").GetString()!);
     }
     private async Task<JsonElement> RpcAsync(object input, int timeoutSeconds, CancellationToken cancellation)
@@ -136,6 +146,7 @@ public sealed class WebSession : IDisposable
     }
     public void Dispose()
     {
+        popups?.Dispose();
         foreach (var item in pending.Values) item.TrySetCanceled(); pending.Clear(); browser.Dispose();
     }
 }

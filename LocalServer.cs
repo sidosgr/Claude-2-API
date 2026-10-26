@@ -8,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 namespace ClaudeLocalBridge;
 
-public sealed class LocalServer(BridgeState state, Func<string,string,int,CancellationToken,Task<Completion>> complete, ModelCatalog? catalog = null) : IAsyncDisposable
+public sealed class LocalServer(BridgeState state, Func<string,string,int,CancellationToken,Task<Completion>> complete, ModelCatalog? catalog = null, Func<string,string,int,ThinkingOptions,CancellationToken,Task<Completion>>? completeThinking = null) : IAsyncDisposable
 {
     private WebApplication? app;
     private readonly ModelCatalog models=catalog??new();
@@ -68,12 +68,16 @@ public sealed class LocalServer(BridgeState state, Func<string,string,int,Cancel
             using var document=await JsonDocument.ParseAsync(context.Request.Body,cancellationToken:cancellation.Token);
             var request=ChatProtocol.Parse(document.RootElement,openAi,settings.ToolCalling);
             var model=models.Resolve(request.Model,settings.Model);
-            context.Response.Headers["X-Local-Claude-Compatibility"]=string.Join(",",request.Warnings);
+            var thinking=request.HasThinking?request.Thinking:ThinkingOptions.FromLevel(settings.ThinkingLevel);
+            context.Response.Headers["X-Local-Claude-Thinking"]="mode="+thinking.Mode+";effort="+thinking.Effort;
+            var warnings=request.Warnings.AsEnumerable();
+            if(!request.HasThinking&&thinking.Mode!="off")warnings=warnings.Concat(new[]{"experimental_web_thinking_passthrough","thinking_output_not_returned"});
+            context.Response.Headers["X-Local-Claude-Compatibility"]=string.Join(",",warnings.Distinct());
             entered=await generation.WaitAsync(0,cancellation.Token);
             if(!entered)throw new BridgeException(429,"request_in_progress","One Claude request is already running. Try again after it finishes.");
             using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(settings.TimeoutSeconds));
-            var raw=await complete(request.Prompt,model,settings.TimeoutSeconds,timeout.Token);
+            var raw=completeThinking is null ? await complete(request.Prompt,model,settings.TimeoutSeconds,timeout.Token) : await completeThinking(request.Prompt,model,settings.TimeoutSeconds,thinking,timeout.Token);
             var result=ChatProtocol.Decode(request,raw);
             if(openAi && request.Stream)await WriteOpenAiSse(context,request,result);
             else if(openAi)

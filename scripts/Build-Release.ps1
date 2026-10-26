@@ -1,4 +1,4 @@
-param([string]$AppVersion='',[string]$OutputDirectory='',[string]$InformationalVersion='')
+param([string]$AppVersion='',[string]$OutputDirectory='',[string]$InformationalVersion='',[switch]$SkipSetup)
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path -Parent $PSScriptRoot
 if(-not $AppVersion){$AppVersion=([xml](Get-Content -Raw (Join-Path $repoRoot 'ClaudeLocalBridge.csproj'))).Project.PropertyGroup.Version}
@@ -18,4 +18,14 @@ $zip=Join-Path $packageFolder 'LocalClaudeBridge-Windows-x64.zip'
 Compress-Archive -Path (Join-Path $OutputDirectory '*') -DestinationPath $zip -CompressionLevel Fastest -Force
 $digest=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -LiteralPath (Join-Path $packageFolder 'SHA256SUMS.txt') -Value ($digest+'  LocalClaudeBridge-Windows-x64.zip')
+if(-not $SkipSetup){
+    $metadata=Join-Path $packageFolder 'setup-package.json'
+    @{Version=$AppVersion;Size=(Get-Item -LiteralPath $zip).Length;Sha256=$digest} | ConvertTo-Json | Set-Content -LiteralPath $metadata
+    $setupOutput=Join-Path $repoRoot ('artifacts\setup\'+$AppVersion)
+    & dotnet publish (Join-Path $repoRoot 'tools\Setup\LocalClaudeBridge.Setup.csproj') @common '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' ('-p:PackagePath='+$zip) ('-p:PackageMetadata='+$metadata) '-o' $setupOutput
+    if($LASTEXITCODE -ne 0){throw 'Single-file installer build failed.'}
+    $setup=Join-Path $packageFolder ('LocalClaudeBridge-Setup-'+$AppVersion+'-x64.exe')
+    Copy-Item -LiteralPath (Join-Path $setupOutput 'LocalClaudeBridge-Setup.exe') -Destination $setup -Force
+    Add-Content -LiteralPath (Join-Path $packageFolder 'SHA256SUMS.txt') -Value ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+(Split-Path -Leaf $setup))
+}
 [pscustomobject]@{Version=$AppVersion;Package=$zip;Size=(Get-Item -LiteralPath $zip).Length;SHA256=$digest}|ConvertTo-Json

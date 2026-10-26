@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup>
+  <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF>
+  <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>LocalClaudeBridge-Setup</AssemblyName>
+  <Version>0.4.2</Version><ApplicationIcon>..\..\Assets\Bridge.ico</ApplicationIcon>
+ </PropertyGroup>
+ <ItemGroup>
+  <Compile Include="..\..\UpdateModels.cs" Link="UpdateModels.cs"/><Compile Include="..\..\AppUpdates.cs" Link="AppUpdates.cs"/><Compile Include="..\..\UpdateInstaller.cs" Link="UpdateInstaller.cs"/>
+  <Resource Include="..\..\Assets\Bridge.ico" Link="Bridge.ico"/>
+  <EmbeddedResource Include="$(PackagePath)" LogicalName="BridgePackage.zip"/>
+  <EmbeddedResource Include="$(PackageMetadata)" LogicalName="BridgePackage.json"/>
+ </ItemGroup>
+</Project>

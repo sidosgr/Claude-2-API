@@ -9,6 +9,9 @@
  <SolidColorBrush x:Key="HoverBrush" Color="#354966"/>
  <SolidColorBrush x:Key="AccentBrush" Color="#8DAEFF"/>
  <Style TargetType="Window"><Setter Property="Background" Value="{DynamicResource WindowBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+ <Style TargetType="TabControl"><Setter Property="Padding" Value="0,10,0,0"/><Setter Property="Background" Value="{DynamicResource WindowBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="BorderThickness" Value="0"/></Style>
+ <Style TargetType="TabItem"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="FontSize" Value="12"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Border x:Name="Tab" Background="{DynamicResource PanelBrush}" CornerRadius="5,5,0,0" Padding="10,10" Margin="0,0,3,0"><ContentPresenter ContentSource="Header"/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Tab" Property="Background" Value="{DynamicResource ButtonBrush}"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tab" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+ <Style TargetType="ContextMenu"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/></Style>
  <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
  <Style TargetType="Button">
   <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="Background" Value="{DynamicResource ButtonBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>

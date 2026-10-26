@@ -34,23 +34,45 @@ globalThis.localClaudeBridgeRun = async function (input, signal) {
     return data.filter(o => typeof o.uuid === 'string').map((o, i) => ({ id: o.uuid, name: typeof o.name === 'string' ? o.name : 'Workspace ' + (i + 1) }));
   }
   if (input.operation === 'models') {
-    const trigger = [...document.querySelectorAll('button')].find(button => /^Model:\s*(Sonnet|Haiku|Opus|Fable)/i.test(button.getAttribute('aria-label') || ''));
+    // NavigationCompleted can precede the site's client-side model picker.
+    let trigger;
+    const readyDeadline = Date.now() + 6000;
+    do {
+      trigger = [...document.querySelectorAll('button')].find(button => /^Model:\s*(Sonnet|Haiku|Opus|Fable)/i.test(button.getAttribute('aria-label') || ''));
+      if (trigger || signal?.aborted) break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    } while (Date.now() < readyDeadline);
+    if (signal?.aborted) throw new Error('request_aborted');
     if (!trigger) throw new Error('model_picker_missing');
     const opened = trigger.getAttribute('aria-expanded') !== 'true';
     if (opened) trigger.click();
+    let moreTrigger, openedMore = false;
     try {
       const deadline = Date.now() + 3000;
+      const found = new Map(); let lastChange = Date.now();
       do {
         const menus = [...document.querySelectorAll('[role="menu"]')].filter(menu => menu.getBoundingClientRect().width > 0);
         for (const menu of menus) {
           const models = globalThis.LocalClaudeExtractModels(menu);
-          if (models.length) return models;
+          for (const model of models) if (!found.has(model.id)) { found.set(model.id, model); lastChange = Date.now(); }
+          // Current Claude UI nests alternatives under More models. Opening a
+          // submenu does not choose a model or change the user's preference.
+          const more = [...menu.querySelectorAll('[role="menuitem"]')].find(row => /^More models\b/i.test(row.textContent?.trim() || ''));
+          if (more && !moreTrigger) {
+            moreTrigger = more;
+            if (more.getAttribute('aria-expanded') !== 'true') { more.click(); openedMore = true; lastChange = Date.now(); }
+          }
         }
-        await new Promise(resolve => requestAnimationFrame(resolve));
+        if (found.size && Date.now() - lastChange >= 650) return [...found.values()];
+        await new Promise(resolve => setTimeout(resolve, 100));
       } while (Date.now() < deadline && !signal?.aborted);
       if (signal?.aborted) throw new Error('request_aborted');
+      if (found.size) return [...found.values()];
       throw new Error('no_available_models');
-    } finally { if (opened && trigger.isConnected && trigger.getAttribute('aria-expanded') === 'true') trigger.click(); }
+    } finally {
+      if (opened && trigger.isConnected && trigger.getAttribute('aria-expanded') === 'true') trigger.click();
+      else if (openedMore && moreTrigger?.isConnected && moreTrigger.getAttribute('aria-expanded') === 'true') moreTrigger.click();
+    }
   }
   if (input.operation !== 'complete') throw new Error('unsupported_operation');
   const conversation = crypto.randomUUID();
@@ -58,7 +80,7 @@ globalThis.localClaudeBridgeRun = async function (input, signal) {
     prompt: input.prompt, model: input.model,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', locale: navigator.language || 'en-US',
     attachments: [], files: [], sync_sources: [], tools: [], personalized_styles: [],
-    rendering_mode: 'messages', thinking_mode: 'off', effort: 'low',
+    rendering_mode: 'messages', thinking_mode: input.thinking_mode || 'off', effort: input.effort || 'low',
     turn_message_uuids: { human_message_uuid: crypto.randomUUID(), assistant_message_uuid: crypto.randomUUID() },
     create_conversation_params: { name: 'Local Bridge request', model: input.model, include_conversation_preferences: true,
       paprika_mode: null, compass_mode: null, is_temporary: false, enabled_imagine: false, tool_search_mode: 'auto' }

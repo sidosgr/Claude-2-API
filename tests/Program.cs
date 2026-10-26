@@ -10,6 +10,20 @@ void Check(bool value, string message) { if (!value) throw new Exception(message
 var folder = Path.Combine(Path.GetTempPath(), "LocalClaudeBridge-Tests-" + Guid.NewGuid().ToString("N"));
 var path = Path.Combine(folder, "settings.json");
 var state = new BridgeState(path);
+BridgeRequest ParseThinking(string fields)
+{
+    using var document=JsonDocument.Parse("{\"messages\":[{\"role\":\"user\",\"content\":\"OK\"}],"+fields+"}");
+    return ChatProtocol.Parse(document.RootElement,true,true);
+}
+Check(ParseThinking("\"reasoning_effort\":\"low\"").Thinking==new ThinkingOptions("extended","low"),"Low effort must reach web controls");
+Check(ParseThinking("\"reasoning\":{\"effort\":\"medium\"}").Thinking==new ThinkingOptions("extended","medium"),"Reasoning object must map medium effort");
+Check(ParseThinking("\"thinking\":{\"type\":\"adaptive\"},\"output_config\":{\"effort\":\"high\"}").Thinking==new ThinkingOptions("extended","high"),"Native effort must map to web high");
+Check(ParseThinking("\"thinking\":{\"type\":\"disabled\"}").Thinking.Mode=="off","Disabled thinking must remain off");
+Check(ParseThinking("\"reasoning_effort\":\"none\"").Thinking.Mode=="off","None effort must disable thinking");
+Check(ParseThinking("\"reasoning_effort\":\"max\"").Thinking.Effort=="max","Max effort must pass through unchanged");
+Check(ParseThinking("\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048}").Warnings.Contains("thinking_token_budget_not_enforced"),"Hard thinking budget cannot be promised");
+try{ParseThinking("\"thinking\":{\"type\":\"disabled\"},\"reasoning_effort\":\"high\"");throw new Exception("Conflicting thinking accepted");}catch(BridgeException){count++;}
+Check(new BridgeState(path).Settings.AutoStartEndpoint&&!new BridgeState(path).Settings.EndpointEnabled&&!new BridgeState(path).Settings.ShowBrowser,"First launch must hide verified browser and wait for first endpoint connection");
 Check(BridgeState.NormalizeModel("claude-sonnet-5.5") == "claude-sonnet-5-5", "Sonnet display version must use the documented model ID");
 Check(state.Settings.DarkMode && state.Settings.RequireApiKey && state.Settings.ToolCalling,"New settings must default to dark mode, authenticated local access and tool translation");
 var key = state.CreateKey("Test client");
@@ -150,4 +164,22 @@ using(var browser=new HttpRequestMessage(HttpMethod.Get,"/v1/models"))
  browser.Headers.Add("Origin","https://example.com");Check((await client.SendAsync(browser)).StatusCode==HttpStatusCode.Forbidden,"No-key mode must preserve browser-origin restrictions");
 }
 await server.DisposeAsync();
+state.Update(state.Settings with{ThinkingLevel="high"});
+ThinkingOptions? forwarded=null;
+await using(var thinkingServer=new LocalServer(state,(_,_,_,_)=>throw new Exception("Legacy callback used"),catalog,(_,model,_,thinking,_)=>{forwarded=thinking;return Task.FromResult(new Completion("OK",model));}))
+{
+ await thinkingServer.StartAsync();
+ using(var response=await client.PostAsJsonAsync("/v1/chat/completions",Body("OK")))
+ {
+  Check(response.IsSuccessStatusCode&&forwarded==new ThinkingOptions("extended","high"),"Saved thinking default must reach the web callback");
+  Check(response.Headers.GetValues("X-Local-Claude-Thinking").Single()=="mode=extended;effort=high","Effective thinking controls must be observable");
+ }
+ using(var response=await client.PostAsJsonAsync("/v1/chat/completions",new{messages=new[]{new{role="user",content="OK"}},reasoning_effort="none"}))
+  Check(response.IsSuccessStatusCode&&forwarded?.Mode=="off","Explicit API off must override saved high");
+ foreach(var level in new[]{"low","medium","high","xhigh","max"})
+ {
+  using var response=await client.PostAsJsonAsync("/v1/chat/completions",new{messages=new[]{new{role="user",content="OK"}},reasoning_effort=level});
+  Check(response.IsSuccessStatusCode&&forwarded==new ThinkingOptions("extended",level),"API thinking level must reach callback unchanged: "+level);
+ }
+}
 Console.WriteLine($"PASS: {count} integration assertions. Synthetic backend only; no Claude account requests.");

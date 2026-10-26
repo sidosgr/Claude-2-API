@@ -31,3 +31,4 @@ jobs:
           path: |
             artifacts/release/*/LocalClaudeBridge-Windows-x64.zip
             artifacts/release/*/SHA256SUMS.txt
+            artifacts/release/*/LocalClaudeBridge-Setup-*-x64.exe

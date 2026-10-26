@@ -3,14 +3,14 @@ using System.Text.RegularExpressions;
 namespace ClaudeLocalBridge;
 
 public sealed record ToolDefinition(string Name, string Description, JsonElement Parameters);
-public sealed record BridgeRequest(string Prompt, string Model, bool Stream, bool IncludeUsage, IReadOnlyList<ToolDefinition> Tools, string ToolChoice, string? ForcedTool, bool ParallelTools, string? ProtocolId, bool JsonOutput, IReadOnlyList<string> Stops, IReadOnlyList<string> Warnings);
+public sealed record BridgeRequest(string Prompt, string Model, bool Stream, bool IncludeUsage, IReadOnlyList<ToolDefinition> Tools, string ToolChoice, string? ForcedTool, bool ParallelTools, string? ProtocolId, bool JsonOutput, IReadOnlyList<string> Stops, IReadOnlyList<string> Warnings, ThinkingOptions Thinking, bool HasThinking);
 
 public static class ChatProtocol
 {
     private static readonly HashSet<string> Fields = new(StringComparer.Ordinal)
     {
         "model", "messages", "stream", "system", "max_tokens", "max_completion_tokens", "temperature", "top_p", "top_k", "presence_penalty", "frequency_penalty", "seed", "stop",
-        "tools", "tool_choice", "parallel_tool_calls", "stream_options", "store", "metadata", "user", "service_tier", "prompt_cache_key", "prompt_cache_retention", "reasoning_effort", "reasoning", "thinking", "enable_thinking", "response_format", "n"
+        "tools", "tool_choice", "parallel_tool_calls", "stream_options", "store", "metadata", "user", "service_tier", "prompt_cache_key", "prompt_cache_retention", "reasoning_effort", "reasoning", "thinking", "enable_thinking", "output_config", "response_format", "n"
     };
     public static BridgeRequest Parse(JsonElement root, bool openAi, bool allowTools)
     {
@@ -32,8 +32,9 @@ public static class ChatProtocol
             if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) || !double.IsFinite(number) || number < min || number > max) throw Invalid(name + " is outside its valid range.");
             warnings.Add(name + "_not_enforced");
         }
-        foreach (var name in new[] { "seed", "reasoning_effort", "reasoning", "thinking", "enable_thinking" })
+        foreach (var name in new[] { "seed" })
             if (root.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null) warnings.Add(name + "_not_enforced");
+        var thinking=ReadThinking(root,warnings);
         if (root.TryGetProperty("store", out var store) && store.ValueKind != JsonValueKind.Null)
         {
             if (store.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw Invalid("store must be a boolean.");
@@ -143,7 +144,58 @@ public static class ChatProtocol
         else if (jsonOutput) prompt="Return a valid JSON object only, with no Markdown fences.\n\n"+prompt;
         if (budget is not null) prompt="The caller requests an output budget of approximately "+budget+" tokens. Keep your output concise within that budget.\n\n"+prompt;
         if (prompt.Length>400_000) throw new BridgeException(413,"prompt_too_large","Assembled prompt exceeds 400,000 characters.");
-        return new(prompt,model,stream,usage,tools,choice,forced,parallel,protocol,jsonOutput,stops,warnings.Distinct().ToArray());
+        var hasThinking=new[]{"reasoning_effort","reasoning","output_config","thinking","enable_thinking"}.Any(name=>root.TryGetProperty(name,out var control)&&control.ValueKind!=JsonValueKind.Null);
+        return new(prompt,model,stream,usage,tools,choice,forced,parallel,protocol,jsonOutput,stops,warnings.Distinct().ToArray(),thinking,hasThinking);
+    }
+
+    private static ThinkingOptions ReadThinking(JsonElement root,List<string> warnings)
+    {
+        string? effort=null; bool? enabled=null;
+        void SetEffort(JsonElement value)
+        {
+            var text=String(value,"reasoning effort");
+            if(text is not ("none" or "minimal" or "low" or "medium" or "high" or "xhigh" or "max"))throw Invalid("Thinking effort must be none, minimal, low, medium, high, xhigh, or max.");
+            if(effort is not null && effort!=text)throw Invalid("Conflicting reasoning effort fields.");
+            effort=text;
+        }
+        void SetEnabled(bool value)
+        {
+            if(enabled is not null && enabled!=value)throw Invalid("Conflicting thinking controls.");
+            enabled=value;
+        }
+        if(root.TryGetProperty("reasoning_effort",out var direct)&&direct.ValueKind!=JsonValueKind.Null)SetEffort(direct);
+        foreach(var name in new[]{"reasoning","output_config"})
+        {
+            if(!root.TryGetProperty(name,out var config)||config.ValueKind==JsonValueKind.Null)continue;
+            if(config.ValueKind!=JsonValueKind.Object)throw Invalid(name+" must be an object.");
+            foreach(var field in config.EnumerateObject())if(field.Name!="effort")throw Invalid("Unsupported "+name+" field: "+field.Name);
+            if(config.TryGetProperty("effort",out var level))SetEffort(level);
+        }
+        if(root.TryGetProperty("enable_thinking",out var flag)&&flag.ValueKind!=JsonValueKind.Null)
+        {
+            if(flag.ValueKind is not (JsonValueKind.True or JsonValueKind.False))throw Invalid("enable_thinking must be a boolean.");
+            SetEnabled(flag.GetBoolean());
+        }
+        if(root.TryGetProperty("thinking",out var thinking)&&thinking.ValueKind!=JsonValueKind.Null)
+        {
+            if(thinking.ValueKind!=JsonValueKind.Object||!thinking.TryGetProperty("type",out var type))throw Invalid("thinking requires a type: enabled, adaptive, or disabled.");
+            var kind=String(type,"thinking.type");
+            if(kind is not ("enabled" or "adaptive" or "disabled"))throw Invalid("Unsupported thinking.type. Use enabled, adaptive, or disabled.");
+            SetEnabled(kind!="disabled");
+            foreach(var field in thinking.EnumerateObject())if(field.Name is not ("type" or "budget_tokens" or "display"))throw Invalid("Unsupported thinking field: "+field.Name);
+            if(thinking.TryGetProperty("budget_tokens",out var budget))
+            {
+                if(budget.ValueKind!=JsonValueKind.Number||!budget.TryGetInt32(out var number)||number<1)throw Invalid("thinking.budget_tokens must be a positive integer.");
+                warnings.Add("thinking_token_budget_not_enforced");
+            }
+            if(thinking.TryGetProperty("display",out var display)&&String(display,"thinking.display") is not ("omitted" or "summarized"))throw Invalid("Unsupported thinking.display.");
+        }
+        if(effort=="none")SetEnabled(false);
+        else if(effort is not null)SetEnabled(true);
+        if(enabled is null)return new();
+        warnings.Add("experimental_web_thinking_passthrough");warnings.Add("thinking_output_not_returned");
+        if(effort=="minimal")warnings.Add("thinking_effort_mapped_to_low");
+        return new(enabled.Value?"extended":"off",effort switch {"minimal" or "low"=>"low","medium"=>"medium","high"=>"high","xhigh"=>"xhigh","max"=>"max",_=>enabled.Value?"medium":"low"});
     }
 
     public static Completion Decode(BridgeRequest request, Completion raw)

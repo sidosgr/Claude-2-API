@@ -3,17 +3,24 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Assets\Bridge.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ClaudeLocalBridge</AssemblyName>
-    <Version>0.3.0</Version>
+    <Version>0.4.2</Version>
   </PropertyGroup>
   <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Resource Include="Assets\Bridge.ico" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="WebBridge.js" />
     <Compile Remove="tests\**\*.cs" />
     <Compile Remove="tools\**\*.cs" />
+    <Page Remove="tools\**\*.xaml" />
+    <ApplicationDefinition Remove="tools\**\*.xaml" />
     <None Update="README.md" CopyToPublishDirectory="PreserveNewest" />
     <None Update="LICENSE" CopyToPublishDirectory="PreserveNewest" />
     <None Update="TESTING.md" CopyToPublishDirectory="PreserveNewest" />

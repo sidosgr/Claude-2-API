@@ -2,7 +2,7 @@
 
 An experimental, open-source Windows app that connects a **regular Claude web session** to a local text-generation endpoint. Sign in directly on `https://claude.ai` inside the app; no Claude Code login or Anthropic API key is used.
 
-**Version 0.3.0:** in-app update checks, verified downloads, and installation/restart are included alongside dark mode, optional local API keys, model discovery, and harness tool-call translation. Live Sonnet and Haiku requests returned `OK`; the installed Pi transport completed a tool-call/result/final-answer round trip. The embedded Claude page displayed `Free plan`. Remaining quota and allowance accounting are not exposed. See [TESTING.md](TESTING.md). This experiment uses undocumented Claude website interfaces and can be affected by website changes or account restrictions.
+**Version 0.4.2:** tabbed settings, complete model discovery including the More models submenu, request-level thinking effort, click-to-copy API URL, themed right-click controls, automatic connection, and a single Windows installer. Live discovery returned Sonnet 5.5 and Haiku 5.5; a Sonnet request with High thinking returned HTTP 200 and OK. Remaining quota and exact reasoning-token budgets are not exposed. See [TESTING.md](TESTING.md). This app uses undocumented Claude web interfaces and may be affected by website changes or account restrictions.
 
 ## Run on Windows
 
@@ -12,16 +12,26 @@ From source, install the .NET 8 SDK, then run:
 
 ```powershell
 .\scripts\Build-Release.ps1
-.\artifacts\release\0.3.0\win-x64\ClaudeLocalBridge.exe
+.\artifacts\release\0.4.2\LocalClaudeBridge-Setup-0.4.2-x64.exe
 ```
 
 1. Sign in on the Claude page inside the app. Email login may work when an identity provider blocks embedded browsers. Complete any browser verification yourself.
-2. Click **Check session**. Select a workspace if you have several. The app refreshes models from the visible Claude picker after verifying the saved workspace; you can also click **Refresh models from Claude**.
+2. The app checks the session automatically, selects the first workspace, and refreshes models. Choose another workspace manually if needed. The browser hides when connected; **Show Claude browser** reveals it. Sign-in popups use separate windows sharing the same app profile. Complete sign-in yourself; if a provider blocks embedded login, try Claude's email option.
 3. Match the **Claude web model** setting to a model available to your account. Default: `claude-sonnet-5-5` (Sonnet 5.5). Machine IDs use hyphens, not decimal dots; the earlier `claude-sonnet-5.5` input is migrated automatically.
-4. Click **Test local endpoint → Claude** at the bottom of the left panel. It sends “Reply with exactly OK.” through the local API and creates a chat in Claude.
+4. Click **Test local endpoint → Claude** on the **Logs** tab. It sends “Reply with exactly OK.” through the local API and creates a chat in Claude.
 5. Create a local API key for your client and copy the displayed key. Only its hash is saved. To run without a key, uncheck **Require a local API key**, save settings, and restart the endpoint. Local SDKs that insist on a key can use a dummy value in this mode.
 
 The endpoint starts on demand and binds only to `127.0.0.1`. Default base URL: `http://127.0.0.1:8081/v1`. Settings provide port selection, OpenAI compatibility, model discovery and selection, request timeout, local authentication, tool-call translation, and appearance. **Dark mode is the default**, with an optional light theme. Hover the info labels for explanations and suggested values.
+
+## Connection, settings, and sign-in
+
+Settings are organized into **Account, API, Models, Keys, App, and Logs** tabs. Click the endpoint URL at the top right to copy it. The tray and window right-click menus provide model and thinking selection, dark mode, browser visibility, startup preferences, API options, update checks, and shortcuts to settings tabs.
+
+Use **Connect Claude + start API** in the window or tray-icon right-click menu. Separate green indicators show **Claude · Connected** and **Local API · Running**. With **Resume endpoint on startup** enabled, later launches resume an endpoint that was successfully started. **Stop** disables resuming until you connect again. The browser hides after verification; its visibility preference persists. Sign-in popup handling preserves the parent page, opener relationship, and shared WebView2 environment/profile. It reopens Claude to check the saved session when the popup closes.
+
+The single installer EXE bundles .NET, verifies its embedded ZIP, installs per user, creates a Start-menu shortcut, and opens the app. WebView2 Evergreen Runtime is still required. The portable ZIP remains available. This custom installer does not register an Add/Remove Programs uninstaller.
+
+Thinking passthrough accepts `reasoning_effort`, `reasoning.effort`, and Messages-shaped `thinking` / `output_config.effort`. Off/none disables web thinking. Low, medium, high, xhigh, and max pass through unchanged with web thinking mode extended; minimal maps to low. A saved default on the Models tab applies only when API controls are omitted. Explicit off/none overrides it. The X-Local-Claude-Thinking response header reports the effective mode and effort. High was accepted in a live Sonnet 5.5 test; other levels have transport regression coverage. Hard thinking budgets and returned thinking blocks remain unavailable. This is experimental website parameter translation.
 
 ## Update inside the app
 
@@ -71,7 +81,7 @@ Pi custom providers need `"authHeader": true` alongside `"api": "openai-completi
 Harness compatibility and limits:
 
 - Text and function tools are supported. Tool definitions/history are translated through structured prompts; the reply is checked for the expected protocol ID, declared tool names, object arguments, required properties, and call-count constraints. The harness executes returned calls. This is prompt-based translation, not native website tool execution or complete JSON Schema validation. Malformed tool replies return 502 without retrying or forwarding a tool call.
-- Common Pi/OpenAI fields such as `max_tokens`, `max_completion_tokens`, `stream_options`, `store`, `metadata`, `temperature`, and tool selection are accepted. Token budgets become approximate prompt guidance; sampling, seed, and thinking controls cannot be enforced. The `X-Local-Claude-Compatibility` response header lists these caveats. `stop` strings are applied to the final text. `json_object` output is syntax-checked; strict JSON Schema output is unsupported.
+- Common Pi/OpenAI fields such as `max_tokens`, `max_completion_tokens`, `stream_options`, `store`, `metadata`, `temperature`, and tool selection are accepted. Token budgets become approximate prompt guidance; sampling and seed cannot be enforced; thinking controls use the web mapping above. The `X-Local-Claude-Compatibility` response header lists these caveats. `stop` strings are applied to the final text. `json_object` output is syntax-checked; strict JSON Schema output is unsupported.
 - Images, audio, files, legacy function APIs, and the Responses API are unsupported. Unknown fields and invalid values return explicit errors.
 - OpenAI SSE is buffered: generation finishes before output is emitted. It is not token-by-token delivery.
 - Every request creates a new Claude chat. Full caller history is serialized into prompt context, including system/developer instructions; this does not provide native system-message priority. No existing chats are read or deleted.
